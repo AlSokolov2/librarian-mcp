@@ -6,9 +6,11 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     rules: {
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error', // Повысили до ошибки!
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-console': ['warn', { allow: ['error', 'warn'] }],
+      'prefer-const': 'error',
+      'no-useless-escape': 'error',
     },
   },
   {
