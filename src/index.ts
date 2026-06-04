@@ -30,11 +30,13 @@ let KNOWLEDGE_PATH = process.env.KNOWLEDGE_HUB_PATH || "";
 if (fs.existsSync("/app/knowledge-hub")) {
   KNOWLEDGE_PATH = "/app/knowledge-hub";
 }
+
 if (!KNOWLEDGE_PATH) {
   console.error("Error: KNOWLEDGE_HUB_PATH is not set.");
   process.exit(1);
 }
 
+const MAIN_BRANCH = DEFAULT_CONFIG.main_branch;
 const DB_PATH = path.join(KNOWLEDGE_PATH, "meta", "vectors");
 const CONFIG_PATH = path.join(KNOWLEDGE_PATH, "meta", "config.json");
 
@@ -54,8 +56,9 @@ function initializeHub() {
 
   try {
     execSync("git rev-parse --is-inside-work-tree", { cwd: KNOWLEDGE_PATH });
-  } catch (_e) {
+  } catch {
     execSync("git init", { cwd: KNOWLEDGE_PATH });
+    console.error("Initialized new Git repository in Hub.");
   }
 }
 
@@ -70,7 +73,7 @@ let extractor: any = null;
 
 async function getEmbedding(text: string): Promise<number[]> {
   if (!extractor) {
-    console.error("Loading embedding model...");
+    console.error("Loading embedding model: Xenova/all-MiniLM-L6-v2...");
     extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
   }
   const output = (await extractor(text, { pooling: "mean", normalize: true })) as any;
@@ -104,7 +107,7 @@ async function indexFile(relPath: string, content: string) {
     } else {
       await db.createTable("knowledge_chunks", data);
     }
-  } catch (_e) {
+  } catch {
     console.error("Indexing failed.");
   }
 }
@@ -213,12 +216,12 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "list_drafts") return { content: [{ type: "text", text: execHubCommand("git branch --list 'draft/*'").trim() || "No drafts." }] };
     if (name === "approve_draft") {
       const dId = String(args?.draft_name);
-      execHubCommand(`git checkout ${hubConfig.main_branch} && git merge "draft/${dId}" --no-ff -m "Approved ${dId}" && git branch -d "draft/${dId}"`);
+      execHubCommand(`git checkout ${MAIN_BRANCH} && git merge "draft/${dId}" --no-ff -m "Approved ${dId}" && git branch -d "draft/${dId}"`);
       return { content: [{ type: "text", text: `Merged ${dId}.` }] };
     }
     if (name === "discard_draft") {
       const dId = String(args?.draft_name);
-      execHubCommand(`git checkout ${hubConfig.main_branch} && git branch -D "draft/${dId}"`);
+      execHubCommand(`git checkout ${MAIN_BRANCH} && git branch -D "draft/${dId}"`);
       return { content: [{ type: "text", text: `Discarded ${dId}.` }] };
     }
     if (name === "reindex_all") {
@@ -245,7 +248,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         const relPath = path.relative(KNOWLEDGE_PATH, file);
         const links = fileContent.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
         links.forEach(link => {
-          const target = link.replace(/[\[\]]/g, "").split("|")[0].trim();
+          const target = link.replace(/[[\]]/g, "").split("|")[0].trim();
           const targetExists = fileBaseNames.includes(target) || fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target)) || fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target + ".md"));
           if (!targetExists) brokenLinks.push(`${relPath}: broken link to [[${target}]]`);
           if (!linkMap[target]) linkMap[target] = [];
@@ -253,7 +256,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
       }
       const orphans = fileBaseNames.filter(n => !linkMap[n] && n !== "PROJECT_MAP");
-      return { content: [{ type: "text", text: `Health Report:\nBroken links: ${brokenLinks.length}\nOrphans: ${orphans.length}\n\nDetail:\n${brokenLinks.join("\n")}\nOrphans: ${orphans.join(", ")}` }] };
+      return { content: [{ type: "text", text: `Health Report:\nBroken links: ${brokenLinks.length}\nOrphans: ${orphans.length}` }] };
     }
     if (name === "update_project_map") {
       const projectsDir = path.join(KNOWLEDGE_PATH, "wiki", "Projects");
@@ -291,7 +294,7 @@ if (hubConfig.enable_http_api) {
 async function run() {
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
-  console.error("Knowledge Hub Librarian (v1.9.1 - Identity Resources) ready.");
+  console.error("Knowledge Hub Librarian ready.");
 }
 
 run().catch(console.error);
