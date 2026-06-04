@@ -1,0 +1,21 @@
+services:
+  librarian-mcp:
+    build:
+      context: .
+      target: development
+    container_name: librarian-mcp-dev
+    volumes:
+      # Монтируем исходники для live-reload
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+      # Монтируем базу знаний
+      - ${KNOWLEDGE_HUB_PATH}:/app/knowledge-hub
+    env_file:
+      - .env
+    environment:
+      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+      - NODE_ENV=development
+    ports:
+      - "${DEV_PORT}:${PORT}" # Используем настраиваемый порт для dev-API
+    # Запускаем через ts-node для быстрой разработки
+    command: npm run dev

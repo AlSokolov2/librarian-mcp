@@ -1,7 +1,6 @@
-# Используем легковесный образ Node.js
-FROM node:20-slim
+# --- STAGE 1: Base (System Dependencies) ---
+FROM node:20-slim AS base
 
-# Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
     git \
     grep \
@@ -10,37 +9,55 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Создаем рабочую директорию и настраиваем права для пользователя node
 WORKDIR /app
-RUN chown -R node:node /app
 
-# Переключаемся на пользователя node
-USER node
+# --- STAGE 2: Development (All dependencies + Source) ---
+FROM base AS development
 
-# Копируем конфиги зависимостей
-COPY --chown=node:node package*.json ./
-COPY --chown=node:node tsconfig.json ./
+# Мы не переключаемся на пользователя node здесь, чтобы было проще
+# управлять монтируемыми томами из WSL/Windows, если нужно.
+# Но для безопасности в рантайме можно будет переключиться.
 
-# Устанавливаем зависимости
+COPY package*.json ./
+COPY tsconfig.json ./
 RUN npm install
 
-# Копируем исходный код
-COPY --chown=node:node src ./src
+# Копируем всё для возможности запуска тестов и линта внутри
+COPY . .
 
-# Собираем проект
+# В режиме dev запускаем через ts-node для мгновенных правок
+CMD ["npm", "run", "dev"]
+
+# --- STAGE 3: Builder (Compilation) ---
+FROM base AS builder
+
+COPY package*.json tsconfig.json ./
+RUN npm install
+COPY src ./src
+COPY src/core.ts ./src/core.ts 
 RUN npm run build
 
-# Создаем точку монтирования
+# --- STAGE 4: Production (Optimized Runtime) ---
+FROM base AS production
+
+# Копируем только артефакты сборки
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/build ./build
+
+# Устанавливаем только production-зависимости
+RUN npm install --omit=dev && npm cache clean --force
+
+# Настройка прав для безопасности
+RUN chown -R node:node /app
+USER node
 RUN mkdir -p /app/knowledge-hub
 
-# Настраиваем Git Identity для автоматических коммитов
+# Настраиваем Git Identity
 RUN git config --global user.name "AI Librarian" && \
     git config --global user.email "librarian@knowledge-hub.local" && \
     git config --global --add safe.directory /app/knowledge-hub
 
 ENV KNOWLEDGE_HUB_PATH=/app/knowledge-hub
-
-# Открываем порт для Ingest API
 EXPOSE 3000
 
 CMD ["node", "build/index.js"]
