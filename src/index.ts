@@ -12,8 +12,36 @@ import * as fs from "fs";
 import * as path from "path";
 import express from "express";
 import * as lancedb from "@lancedb/lancedb";
-import { pipeline } from "@huggingface/transformers";
-import { validateAndEnforceRules, applyTemplateIfNew, LibrarianConfig } from "./core.js";
+import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import { validateAndEnforceRules, applyTemplateIfNew, type LibrarianConfig } from "./core.js";
+
+// --- TYPES & INTERFACES ---
+
+interface SearchArgs {
+  query: string;
+}
+
+interface ReadFileArgs {
+  path: string;
+}
+
+interface WriteFileArgs {
+  path: string;
+  content: string;
+  draft_name?: string;
+}
+
+interface ApproveDraftArgs {
+  draft_name: string;
+}
+
+interface DiscardDraftArgs {
+  draft_name: string;
+}
+
+interface EmbeddingOutput {
+  data: number[] | Float32Array;
+}
 
 // --- CONFIGURATION ---
 const DEFAULT_CONFIG: LibrarianConfig = {
@@ -41,7 +69,7 @@ const DB_PATH = path.join(KNOWLEDGE_PATH, "meta", "vectors");
 const CONFIG_PATH = path.join(KNOWLEDGE_PATH, "meta", "config.json");
 
 // --- INITIALIZATION ---
-function initializeHub() {
+function initializeHub(): void {
   const dirs = ["raw", "wiki", "meta", "scripts", "wiki/Projects", "wiki/_Global", "meta/templates"];
   dirs.forEach(d => {
     const full = path.join(KNOWLEDGE_PATH, d);
@@ -69,15 +97,15 @@ const hubConfig: LibrarianConfig = fs.existsSync(CONFIG_PATH)
   : DEFAULT_CONFIG;
 
 // --- AI STATE ---
-let extractor: any = null;
+let extractor: FeatureExtractionPipeline | null = null;
 
 async function getEmbedding(text: string): Promise<number[]> {
   if (!extractor) {
     console.error("Loading embedding model: Xenova/all-MiniLM-L6-v2...");
     extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
   }
-  const output = (await extractor(text, { pooling: "mean", normalize: true })) as any;
-  return Array.from(output.data as number[]);
+  const output = (await extractor(text, { pooling: "mean", normalize: true })) as EmbeddingOutput;
+  return Array.from(output.data);
 }
 
 const mcpServer = new Server(
@@ -85,16 +113,22 @@ const mcpServer = new Server(
   { capabilities: { tools: {}, resources: {} } }
 );
 
+interface GitError extends Error {
+  stdout?: Buffer | string;
+  stderr?: Buffer | string;
+}
+
 // --- HELPERS ---
-function execHubCommand(command: string) {
+function execHubCommand(command: string): string {
   try {
     return execSync(command, { cwd: KNOWLEDGE_PATH }).toString();
-  } catch (error: any) {
-    return error.stdout?.toString() || error.stderr?.toString() || error.message;
+  } catch (error: unknown) {
+    const gitError = error as GitError;
+    return String(gitError.stdout || gitError.stderr || gitError.message);
   }
 }
 
-async function indexFile(relPath: string, content: string) {
+async function indexFile(relPath: string, content: string): Promise<void> {
   try {
     const db = await lancedb.connect(DB_PATH);
     const tableExists = (await db.tableNames()).includes("knowledge_chunks");
@@ -180,26 +214,30 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   try {
     if (name === "search_knowledge") {
-      const result = execSync(`grep -rEi "${String(args?.query)}" "${KNOWLEDGE_PATH}" --exclude-dir=.git || true`).toString();
+      const searchArgs = args as unknown as SearchArgs;
+      const result = execSync(`grep -rEi "${searchArgs.query}" "${KNOWLEDGE_PATH}" --exclude-dir=.git || true`).toString();
       return { content: [{ type: "text", text: result || "Nothing found." }] };
     }
     if (name === "semantic_search") {
+      const searchArgs = args as unknown as SearchArgs;
       const db = await lancedb.connect(DB_PATH);
       const table = await db.openTable("knowledge_chunks");
-      const results = await table.search(await getEmbedding(String(args?.query))).limit(5).toArray();
+      const results = await table.search(await getEmbedding(searchArgs.query)).limit(5).toArray();
       const text = results.map(r => `[Score: ${Math.round((r._distance as number) * 100) / 100}] ${r.path}:\n${String(r.text).substring(0, 300)}...`).join("\n\n---\n\n");
       return { content: [{ type: "text", text: text || "No results." }] };
     }
     if (name === "read_file") {
-      const fullPath = path.join(KNOWLEDGE_PATH, String(args?.path));
+      const readArgs = args as unknown as ReadFileArgs;
+      const fullPath = path.join(KNOWLEDGE_PATH, readArgs.path);
       if (!fs.existsSync(fullPath)) return { content: [{ type: "text", text: "Not found" }], isError: true };
       return { content: [{ type: "text", text: fs.readFileSync(fullPath, "utf-8") }] };
     }
     if (name === "write_file") {
-      const relPath = String(args?.path);
-      const draftId = args?.draft_name ? String(args.draft_name) : `synthesis-${new Date().toISOString().split('T')[0]}`;
+      const writeArgs = args as unknown as WriteFileArgs;
+      const relPath = writeArgs.path;
+      const draftId = writeArgs.draft_name || `synthesis-${new Date().toISOString().split('T')[0]}`;
       const branchName = `draft/${draftId}`;
-      let content = applyTemplateIfNew(relPath, String(args?.content), KNOWLEDGE_PATH);
+      let content = applyTemplateIfNew(relPath, writeArgs.content, KNOWLEDGE_PATH);
       const val = validateAndEnforceRules(relPath, content, hubConfig);
       if (!val.valid) return { content: [{ type: "text", text: val.error || "Validation failed" }], isError: true };
       content = val.content;
@@ -215,12 +253,14 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (name === "list_drafts") return { content: [{ type: "text", text: execHubCommand("git branch --list 'draft/*'").trim() || "No drafts." }] };
     if (name === "approve_draft") {
-      const dId = String(args?.draft_name);
+      const approveArgs = args as unknown as ApproveDraftArgs;
+      const dId = approveArgs.draft_name;
       execHubCommand(`git checkout ${MAIN_BRANCH} && git merge "draft/${dId}" --no-ff -m "Approved ${dId}" && git branch -d "draft/${dId}"`);
       return { content: [{ type: "text", text: `Merged ${dId}.` }] };
     }
     if (name === "discard_draft") {
-      const dId = String(args?.draft_name);
+      const discardArgs = args as unknown as DiscardDraftArgs;
+      const dId = discardArgs.draft_name;
       execHubCommand(`git checkout ${MAIN_BRANCH} && git branch -D "draft/${dId}"`);
       return { content: [{ type: "text", text: `Discarded ${dId}.` }] };
     }
@@ -268,8 +308,9 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: "Map updated." }] };
     }
     throw new Error(`Unknown tool: ${name}`);
-  } catch (error: any) {
-    return { content: [{ type: "text", text: `Error: ${error.message}` }], isError: true };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { content: [{ type: "text", text: `Error: ${msg}` }], isError: true };
   }
 });
 
@@ -279,11 +320,11 @@ if (hubConfig.enable_http_api) {
   app.use(express.json());
   app.post("/ingest", (req, res) => {
     if (req.headers["x-api-key"] !== hubConfig.api_key) return res.status(401).json({ error: "Unauthorized" });
-    const { filename, content } = req.body;
+    const { filename, content } = req.body as { filename: string; content: string };
     const rawPath = path.join("raw", filename);
     const full = path.join(KNOWLEDGE_PATH, rawPath);
     fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, content as string, "utf-8");
+    fs.writeFileSync(full, content, "utf-8");
     execHubCommand(`git add "${rawPath}"`);
     execHubCommand(`git commit -m "API: ingested ${filename}"`);
     res.json({ status: "success", path: rawPath });
