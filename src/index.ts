@@ -109,7 +109,7 @@ async function getEmbedding(text: string): Promise<number[]> {
 }
 
 const mcpServer = new Server(
-  { name: "knowledge-hub-librarian", version: "1.9.1" },
+  { name: "knowledge-hub-librarian", version: "1.10.0" }, // Upgrade to 1.10.0 for Self-Cleaning
   { capabilities: { tools: {}, resources: {} } }
 );
 
@@ -204,7 +204,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       { name: "approve_draft", description: "Approve draft.", inputSchema: { type: "object", properties: { draft_name: { type: "string" } }, required: ["draft_name"] } },
       { name: "discard_draft", description: "Discard draft.", inputSchema: { type: "object", properties: { draft_name: { type: "string" } }, required: ["draft_name"] } },
       { name: "reindex_all", description: "Full re-indexing.", inputSchema: { type: "object", properties: {} } },
-      { name: "check_health", description: "Health audit.", inputSchema: { type: "object", properties: {} } },
+      { name: "check_health", description: "Comprehensive health and structural audit.", inputSchema: { type: "object", properties: {} } },
       { name: "update_project_map", description: "Update project map.", inputSchema: { type: "object", properties: {} } },
     ],
   };
@@ -283,20 +283,50 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       const fileBaseNames = wikiFiles.map(f => path.basename(f, ".md"));
       const brokenLinks: string[] = [];
       const linkMap: Record<string, string[]> = {};
+      
+      // 1. Broken Links & Orphans
       for (const file of wikiFiles) {
         const fileContent = fs.readFileSync(file, "utf-8");
         const relPath = path.relative(KNOWLEDGE_PATH, file);
         const links = fileContent.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
         links.forEach(link => {
           const target = link.replace(/[[\]]/g, "").split("|")[0].trim();
-          const targetExists = fileBaseNames.includes(target) || fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target)) || fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target + ".md"));
+          const targetExists = fileBaseNames.includes(target) || 
+                               fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target)) || 
+                               fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target + ".md")) ||
+                               fs.existsSync(path.join(KNOWLEDGE_PATH, target + ".md"));
           if (!targetExists) brokenLinks.push(`${relPath}: broken link to [[${target}]]`);
           if (!linkMap[target]) linkMap[target] = [];
           linkMap[target].push(relPath);
         });
       }
       const orphans = fileBaseNames.filter(n => !linkMap[n] && n !== "PROJECT_MAP");
-      return { content: [{ type: "text", text: `Health Report:\nBroken links: ${brokenLinks.length}\nOrphans: ${orphans.length}` }] };
+
+      // 2. Structural Integrity (Self-Cleaning Detection)
+      const allowedDirs = ["wiki", "raw", "meta", "scripts", ".git", "node_modules"];
+      const allowedRootFiles = ["README.md", "GEMINI.md", "LICENSE", ".gitignore", ".env", "package.json", "package-lock.json", "tsconfig.json"];
+      
+      const rootItems = fs.readdirSync(KNOWLEDGE_PATH);
+      const strayFiles = rootItems.filter(item => {
+        const full = path.join(KNOWLEDGE_PATH, item);
+        const stat = fs.statSync(full);
+        if (stat.isDirectory()) return !allowedDirs.includes(item);
+        return item.endsWith(".md") && !allowedRootFiles.includes(item);
+      });
+
+      const report = [
+        "--- HEALTH REPORT ---",
+        `Broken links: ${brokenLinks.length}`,
+        `Orphans: ${orphans.length}`,
+        `Structural Violations: ${strayFiles.length}`,
+        "",
+        brokenLinks.length > 0 ? "Broken Links:\n" + brokenLinks.join("\n") : "",
+        orphans.length > 0 ? "\nOrphaned Nodes: " + orphans.join(", ") : "",
+        strayFiles.length > 0 ? "\n!!! STRUCTURAL VIOLATIONS (Files/Dirs in Root) !!!\n" + strayFiles.map(f => `- ${f}`).join("\n") : "",
+        strayFiles.length > 0 ? "\nRECOMMENDATION: Move stray files to wiki/ and delete illegal root directories." : "Status: ARCHITECTURAL INTEGRITY VERIFIED."
+      ].filter(Boolean).join("\n");
+
+      return { content: [{ type: "text", text: report }] };
     }
     if (name === "update_project_map") {
       const projectsDir = path.join(KNOWLEDGE_PATH, "wiki", "Projects");
