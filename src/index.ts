@@ -4,6 +4,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { execSync } from "child_process";
 import * as fs from "fs";
@@ -28,13 +30,11 @@ let KNOWLEDGE_PATH = process.env.KNOWLEDGE_HUB_PATH || "";
 if (fs.existsSync("/app/knowledge-hub")) {
   KNOWLEDGE_PATH = "/app/knowledge-hub";
 }
-
 if (!KNOWLEDGE_PATH) {
   console.error("Error: KNOWLEDGE_HUB_PATH is not set.");
   process.exit(1);
 }
 
-const MAIN_BRANCH = DEFAULT_CONFIG.main_branch;
 const DB_PATH = path.join(KNOWLEDGE_PATH, "meta", "vectors");
 const CONFIG_PATH = path.join(KNOWLEDGE_PATH, "meta", "config.json");
 
@@ -54,9 +54,8 @@ function initializeHub() {
 
   try {
     execSync("git rev-parse --is-inside-work-tree", { cwd: KNOWLEDGE_PATH });
-  } catch {
+  } catch (_e) {
     execSync("git init", { cwd: KNOWLEDGE_PATH });
-    console.error("Initialized new Git repository in Hub.");
   }
 }
 
@@ -79,8 +78,8 @@ async function getEmbedding(text: string): Promise<number[]> {
 }
 
 const mcpServer = new Server(
-  { name: "knowledge-hub-librarian", version: "1.9.0" },
-  { capabilities: { tools: {} } }
+  { name: "knowledge-hub-librarian", version: "1.9.1" },
+  { capabilities: { tools: {}, resources: {} } }
 );
 
 // --- HELPERS ---
@@ -90,20 +89,6 @@ function execHubCommand(command: string) {
   } catch (error: any) {
     return error.stdout?.toString() || error.stderr?.toString() || error.message;
   }
-}
-
-function getAllMdFiles(dir: string, allFiles: string[] = []): string[] {
-  if (!fs.existsSync(dir)) return allFiles;
-  const files = fs.readdirSync(dir);
-  files.forEach(file => {
-    const name = path.join(dir, file);
-    if (fs.statSync(name).isDirectory()) {
-      if (file !== ".git" && file !== ".obsidian") getAllMdFiles(name, allFiles);
-    } else if (file.endsWith(".md")) {
-      allFiles.push(name);
-    }
-  });
-  return allFiles;
 }
 
 async function indexFile(relPath: string, content: string) {
@@ -119,12 +104,58 @@ async function indexFile(relPath: string, content: string) {
     } else {
       await db.createTable("knowledge_chunks", data);
     }
-  } catch {
+  } catch (_e) {
     console.error("Indexing failed.");
   }
 }
 
-// --- MCP HANDLERS ---
+// --- MCP HANDLERS (RESOURCES) ---
+mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return {
+    resources: [
+      {
+        uri: "librarian://meta/GEMINI.md",
+        name: "Librarian Constitution",
+        description: "The core rules and philosophy of the Knowledge Hub.",
+        mimeType: "text/markdown",
+      },
+      {
+        uri: "librarian://meta/config.json",
+        name: "Librarian Configuration",
+        description: "Active validation rules for the knowledge base.",
+        mimeType: "application/json",
+      },
+      {
+        uri: "librarian://meta/PROJECT_MAP.md",
+        name: "Project Map",
+        description: "Global index of all projects and knowledge nodes.",
+        mimeType: "text/markdown",
+      }
+    ],
+  };
+});
+
+mcpServer.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const uri = new URL(request.params.uri);
+  const relPath = uri.pathname.startsWith("/") ? uri.pathname.slice(1) : uri.pathname;
+  const fullPath = path.join(KNOWLEDGE_PATH, relPath);
+
+  if (!fs.existsSync(fullPath)) {
+    throw new Error(`Resource not found: ${uri}`);
+  }
+
+  return {
+    contents: [
+      {
+        uri: request.params.uri,
+        mimeType: relPath.endsWith(".md") ? "text/markdown" : "application/json",
+        text: fs.readFileSync(fullPath, "utf-8"),
+      },
+    ],
+  };
+});
+
+// --- MCP HANDLERS (TOOLS) ---
 mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -182,12 +213,12 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === "list_drafts") return { content: [{ type: "text", text: execHubCommand("git branch --list 'draft/*'").trim() || "No drafts." }] };
     if (name === "approve_draft") {
       const dId = String(args?.draft_name);
-      execHubCommand(`git checkout ${MAIN_BRANCH} && git merge "draft/${dId}" --no-ff -m "Approved ${dId}" && git branch -d "draft/${dId}"`);
+      execHubCommand(`git checkout ${hubConfig.main_branch} && git merge "draft/${dId}" --no-ff -m "Approved ${dId}" && git branch -d "draft/${dId}"`);
       return { content: [{ type: "text", text: `Merged ${dId}.` }] };
     }
     if (name === "discard_draft") {
       const dId = String(args?.draft_name);
-      execHubCommand(`git checkout ${MAIN_BRANCH} && git branch -D "draft/${dId}"`);
+      execHubCommand(`git checkout ${hubConfig.main_branch} && git branch -D "draft/${dId}"`);
       return { content: [{ type: "text", text: `Discarded ${dId}.` }] };
     }
     if (name === "reindex_all") {
@@ -205,24 +236,24 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (name === "check_health") {
       const wikiRoot = path.join(KNOWLEDGE_PATH, "wiki");
-      const allFiles = getAllMdFiles(wikiRoot);
-      const fileBaseNames = allFiles.map(f => path.basename(f, ".md"));
+      const wikiFiles = execSync(`find "${wikiRoot}" -name "*.md"`).toString().split("\n").filter(Boolean);
+      const fileBaseNames = wikiFiles.map(f => path.basename(f, ".md"));
       const brokenLinks: string[] = [];
       const linkMap: Record<string, string[]> = {};
-      for (const file of allFiles) {
+      for (const file of wikiFiles) {
         const fileContent = fs.readFileSync(file, "utf-8");
         const relPath = path.relative(KNOWLEDGE_PATH, file);
         const links = fileContent.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
         links.forEach(link => {
-          const target = link.replace(/[[\]]/g, "").split("|")[0].trim();
+          const target = link.replace(/[\[\]]/g, "").split("|")[0].trim();
           const targetExists = fileBaseNames.includes(target) || fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target)) || fs.existsSync(path.join(KNOWLEDGE_PATH, "raw", target + ".md"));
           if (!targetExists) brokenLinks.push(`${relPath}: broken link to [[${target}]]`);
           if (!linkMap[target]) linkMap[target] = [];
           linkMap[target].push(relPath);
         });
       }
-      const orphans = fileBaseNames.filter(n => !linkMap[n]);
-      return { content: [{ type: "text", text: `Health Report:\nBroken links: ${brokenLinks.length}\nOrphans: ${orphans.length}` }] };
+      const orphans = fileBaseNames.filter(n => !linkMap[n] && n !== "PROJECT_MAP");
+      return { content: [{ type: "text", text: `Health Report:\nBroken links: ${brokenLinks.length}\nOrphans: ${orphans.length}\n\nDetail:\n${brokenLinks.join("\n")}\nOrphans: ${orphans.join(", ")}` }] };
     }
     if (name === "update_project_map") {
       const projectsDir = path.join(KNOWLEDGE_PATH, "wiki", "Projects");
@@ -260,7 +291,7 @@ if (hubConfig.enable_http_api) {
 async function run() {
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
-  console.error("Knowledge Hub Librarian ready.");
+  console.error("Knowledge Hub Librarian (v1.9.1 - Identity Resources) ready.");
 }
 
 run().catch(console.error);
