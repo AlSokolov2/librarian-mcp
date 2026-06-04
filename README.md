@@ -51,9 +51,18 @@ graph TD
    - `USER_ID` & `GROUP_ID`: Run `id -u` and `id -g` in your terminal to get these (prevents permission issues).
 
 ### 3. Launch
+
+**For Production (Optimized Image):**
 ```bash
 docker compose up -d
 ```
+*This builds a lightweight image (~200MB) with only runtime dependencies.*
+
+**For Development (Live Reload):**
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+*This mounts your local `src/` folder into the container, allowing for instant code changes without rebuilding.*
 
 ### 4. Connect to your MCP Client
 Add Librarian to your client configuration (e.g., `~/.gemini/settings.json`):
@@ -70,6 +79,19 @@ Add Librarian to your client configuration (e.g., `~/.gemini/settings.json`):
 *Note: If you prefer to use the pre-built image from Docker Hub:*
 ```json
 "args": ["run", "-i", "--rm", "alsokolov2/librarian-mcp:latest"]
+```
+
+---
+
+## 🛠️ Development & Testing
+If you are developing Librarian MCP, you can run tests and linting directly inside the container:
+
+```bash
+# Run tests
+docker exec -it librarian-mcp-dev npm test
+
+# Run linter
+docker exec -it librarian-mcp-dev npm run lint
 ```
 
 ---
