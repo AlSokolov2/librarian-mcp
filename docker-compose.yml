@@ -1,0 +1,16 @@
+services:
+  mcp-librarian:
+    build: .
+    image: librarian-mcp:latest
+    container_name: librarian-mcp
+    # Запускаем контейнер от имени текущего пользователя (через переменные .env)
+    user: "${USER_ID}:${GROUP_ID}"
+    volumes:
+      - ${KNOWLEDGE_HUB_PATH}:/app/knowledge-hub
+    env_file:
+      - .env
+    environment:
+      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

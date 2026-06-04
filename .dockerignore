@@ -1,0 +1,12 @@
+# Ignore heavy or unnecessary files for Docker build context
+node_modules
+build
+.git
+.idea
+.vscode
+.env
+.env.example
+README.md
+LICENSE
+LICENSE.md
+*.log
