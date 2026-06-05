@@ -3,7 +3,7 @@ services:
     build:
       context: .
       target: hub-production
-    image: librarian-hub-mcp:latest
+    image: alsokolov2/librarian-hub-mcp:latest
     container_name: librarian-hub-mcp
     user: "${USER_ID}:${GROUP_ID}"
     volumes:
@@ -20,7 +20,7 @@ services:
     build:
       context: .
       target: git-production
-    image: librarian-git-mcp:latest
+    image: alsokolov2/librarian-git-mcp:latest
     container_name: librarian-git-mcp
     user: "${USER_ID}:${GROUP_ID}"
     volumes:
@@ -37,7 +37,7 @@ services:
     build:
       context: .
       target: search-production
-    image: librarian-search-mcp:latest
+    image: alsokolov2/librarian-search-mcp:latest
     container_name: librarian-search-mcp
     user: "${USER_ID}:${GROUP_ID}"
     volumes:
