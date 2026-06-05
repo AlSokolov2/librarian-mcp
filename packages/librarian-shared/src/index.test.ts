@@ -1,14 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { validateAndEnforceRules, LibrarianConfig } from "./core.js";
+import { validateAndEnforceRules, LibrarianConfig } from "./index.js";
 
 const mockConfig: LibrarianConfig = {
   naming_convention: "^([A-Z][a-z0-9]+_?)+$",
   required_yaml_fields: ["sources"],
   auto_update_date: true,
   main_branch: "master",
-  enable_http_api: false,
-  api_port: 3000,
-  api_key: "test"
+  hub_version: 1,
+  allowed_text_extensions: [".md", ".txt"]
 };
 
 describe("Librarian Core Logic", () => {

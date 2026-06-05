@@ -1,0 +1,14 @@
+{
+  "name": "@librarian/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3"
+  }
+}
