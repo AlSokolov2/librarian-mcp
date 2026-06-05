@@ -1,71 +1,85 @@
-# 📚 Librarian MCP: Microservice Architecture
+# 📚 Librarian MCP: The Atomic Knowledge OS
 
-**Librarian MCP** is an intelligent orchestration layer for your personal knowledge base, following the Unix philosophy: *each service does one thing and does it perfectly.* 
+**Librarian MCP** is an intelligent orchestration layer for your personal knowledge base, inspired by Andrej Karpathy's [LLM Wiki vision](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). It transforms a simple folder of Markdown files into a dynamic, structured, and safe "digital brain" accessible via the **Model Context Protocol (MCP)**.
 
-It transforms a folder of Markdown files into a dynamic, structured, and safe "digital brain" by splitting responsibilities into specialized microservices coordinated by the Model Context Protocol (MCP).
+Unlike traditional RAG systems that merely retrieve fragments, Librarian MCP enables **Iterative Synthesis**—where AI acts as an active editor, following the Unix philosophy: *each service does one thing and does it perfectly.*
 
 ---
 
-## 🏗️ The Microservice Ecosystem
+## 🏗️ The Microservice Suite
 
 ### 🛡️ Librarian Hub (`librarian-hub-mcp`)
-The **Hub** is the guardian of your files and the master of Git.
-- **Goal**: Manage file I/O, enforce naming conventions, handle drafts via Git branches, and audit structural health.
-- **Key Tools**: `read_file`, `write_file`, `approve_draft`, `check_health`, `update_project_map`.
-- **Lightweight**: No heavy AI dependencies.
+The **Hub** is the guardian of your files and the master of structure.
+- **FS Health**: Enforces naming conventions and audits structural integrity.
+- **Git Awareness**: Automatically manages `.gitignore` and tracks text sources.
+- **Smart Templating**: Injects metadata and structure into new notes.
+
+### 📜 Librarian Git (`librarian-git-mcp`)
+The **Git** service is the guardian of versions.
+- **Safety**: Isolates changes in `draft/*` branches.
+- **Primitives**: Provides atomic Git operations for AI agents.
 
 ### 🧠 Librarian Search (`librarian-search-mcp`)
-The **Search** service is the intellectual layer of your digital brain.
-- **Goal**: Provide high-speed semantic and keyword search across your entire knowledge hub.
-- **Key Tools**: `semantic_search`, `search_knowledge`, `reindex_all`.
-- **Private AI**: Local vector database (LanceDB) and embeddings (Transformers.js) - 100% offline.
+The **Search** service is the intellectual layer.
+- **Semantic Search**: Fully local AI (Transformers.js + LanceDB).
+- **Keyword Search**: Blazing fast regex-based lookup.
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Docker Compose)
 
-### 1. Prerequisites
-- Docker & Docker Compose
-- A folder for your Knowledge Hub.
+The easiest way to run the suite is using Docker Compose:
 
-### 2. Configuration
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/AlSokolov2/librarian-mcp.git
-   cd librarian-mcp
-   ```
-2. Create your `.env` file:
-   ```bash
-   cp .env.example .env
-   ```
-3. Configure `KNOWLEDGE_HUB_PATH`, `USER_ID`, and `GROUP_ID`.
+```yaml
+services:
+  librarian-hub:
+    image: alsokolov2/librarian-hub-mcp:latest
+    container_name: librarian-hub-mcp
+    user: "1000:1000" # Run 'id -u' and 'id -g'
+    volumes:
+      - /path/to/your/notes:/app/knowledge-hub
+    environment:
+      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
 
-### 3. Launch Both Services
-```bash
-docker compose up -d
+  librarian-git:
+    image: alsokolov2/librarian-git-mcp:latest
+    container_name: librarian-git-mcp
+    user: "1000:1000"
+    volumes:
+      - /path/to/your/notes:/app/knowledge-hub
+    environment:
+      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+  librarian-search:
+    image: alsokolov2/librarian-search-mcp:latest
+    container_name: librarian-search-mcp
+    user: "1000:1000"
+    volumes:
+      - /path/to/your/notes:/app/knowledge-hub
+    environment:
+      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
 ```
-This will build and launch two separate containers: `librarian-hub-mcp` and `librarian-search-mcp`.
 
-### 4. Connect to your MCP Client
-Add both servers to your client configuration (e.g., `~/.gemini/settings.json`):
+---
 
-```json
-"mcpServers": {
-  "librarian-hub": {
-    "command": "docker",
-    "args": ["exec", "-i", "librarian-hub-mcp", "node", "packages/librarian-hub-mcp/build/index.js"]
-  },
-  "librarian-search": {
-    "command": "docker",
-    "args": ["exec", "-i", "librarian-search-mcp", "node", "packages/librarian-search-mcp/build/index.js"]
-  }
-}
-```
+## 🔒 Hybrid Git Standard
+Librarian implements a **"Text-Heavy, Binary-Light"** standard:
+*   **Tracked**: `.md`, `.txt`, `.json`, `.php`, `.js`, `.py`, `.yaml`, etc.
+*   **Ignored**: `.pdf`, `.png`, `.jpg`, `.zip` and UI settings (`.obsidian/`).
 
 ---
 
 ## 🎓 Knowledge Manager Skill
-This repository includes a **Gemini CLI Skill** located in `SKILLS/knowledge-manager`. Activate it to help the AI agent coordinate the two services effectively.
+This repository includes a **Gemini CLI Skill** located in `.gemini/skills/knowledge-manager`. Activate it to help the AI agent coordinate the ecosystem effectively.
 
 ---
 
@@ -80,6 +94,9 @@ npm run build
 
 # Run core tests
 npm test
+
+# Setup MCP configuration
+npm run setup
 ```
 
 ---

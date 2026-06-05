@@ -1,4 +1,4 @@
-name: Build and Push Docker Image
+name: Build and Push Docker Images
 
 on:
   push:
@@ -8,6 +8,19 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: hub
+            target: hub-production
+            image: alsokolov2/librarian-hub-mcp
+          - service: git
+            target: git-production
+            image: alsokolov2/librarian-git-mcp
+          - service: search
+            target: search-production
+            image: alsokolov2/librarian-search-mcp
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,23 +37,30 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
           context: .
+          target: ${{ matrix.target }}
           push: true
           tags: |
-            alsokolov2/librarian-mcp:latest
-            alsokolov2/librarian-mcp:${{ github.ref_name }}
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ github.ref_name }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=inline
 
+  update-description:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
       - name: Update Docker Hub Description
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: alsokolov2/librarian-mcp
-          short-description: "Intelligent Knowledge OS: Librarian MCP with Local AI & Git Automation."
+          repository: alsokolov2/librarian-hub-mcp
+          short-description: "Librarian Hub MCP: Core file management and Git-aware health audits."
           readme-filepath: ./DOCKERHUB.md
