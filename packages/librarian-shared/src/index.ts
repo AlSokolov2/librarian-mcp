@@ -9,6 +9,7 @@ export interface LibrarianConfig {
   main_branch: string;
   hub_version: number;
   allowed_text_extensions: string[];
+  migration_pending?: boolean;
 }
 
 export const ALLOWED_ROOT_DIRS = ["wiki", "raw", ".librarian", ".git", ".obsidian"];

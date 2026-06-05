@@ -1,0 +1,16 @@
+{
+  "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.",
+  "types": [
+    {"type": "feat", "section": "🚀 Features"},
+    {"type": "fix", "section": "🐛 Bug Fixes"},
+    {"type": "docs", "section": "📝 Documentation"},
+    {"type": "style", "section": "🎨 Style"},
+    {"type": "refactor", "section": "🔨 Refactoring"},
+    {"type": "perf", "section": "⚡ Performance"},
+    {"type": "test", "section": "✅ Tests"},
+    {"type": "chore", "hidden": true}
+  ],
+  "commitUrlFormat": "https://github.com/AlSokolov2/librarian-mcp/commit/{{hash}}",
+  "compareUrlFormat": "https://github.com/AlSokolov2/librarian-mcp/compare/{{previousTag}}...{{currentTag}}",
+  "issueUrlFormat": "https://github.com/AlSokolov2/librarian-mcp/issues/{{id}}"
+}

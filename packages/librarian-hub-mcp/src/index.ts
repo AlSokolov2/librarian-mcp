@@ -38,7 +38,7 @@ interface SearchArgs {
 }
 
 // --- CONFIGURATION & STANDARDS ---
-const LATEST_HUB_VERSION = 3;
+const LATEST_HUB_VERSION = 4;
 
 const DEFAULT_CONFIG: LibrarianConfig = {
   naming_convention: "^([A-Z][a-z0-9]+_?)+$", // Capitalized_Snake_Case
@@ -46,7 +46,8 @@ const DEFAULT_CONFIG: LibrarianConfig = {
   auto_update_date: true,
   main_branch: "master",
   hub_version: LATEST_HUB_VERSION,
-  allowed_text_extensions: [".md", ".txt", ".json", ".php", ".js", ".py", ".yaml", ".yml", ".sql"]
+  allowed_text_extensions: [".md", ".txt", ".json", ".php", ".js", ".py", ".yaml", ".yml", ".sql"],
+  migration_pending: false
 };
 
 function generateGitignore(config: LibrarianConfig): string {
@@ -83,6 +84,145 @@ const CONFIG_PATH = path.join(KNOWLEDGE_PATH, ".librarian", "config.json");
 const PROJECT_MAP_REL_PATH = "wiki/PROJECT_MAP.md";
 
 // --- INITIALIZATION & MIGRATION ---
+function seedTemplates(): void {
+  const templatesDir = path.join(KNOWLEDGE_PATH, ".librarian", "templates");
+  if (!fs.existsSync(templatesDir)) {
+    fs.mkdirSync(templatesDir, { recursive: true });
+  }
+
+  const projectTemplate = `---
+tags: [project]
+sources: []
+---
+# Project: {{title}}
+
+## Overview
+Brief description of the project.
+
+## Tech Stack
+- Item 1
+
+## Key Wiki Nodes
+- [[Node]]
+
+## Documentation (Raw)
+- [[Source]]
+`;
+
+  const entityTemplate = `---
+tags: [entity]
+sources: []
+---
+# {{title}}
+
+## Description
+Core concept or service description.
+
+## Implementation Details
+- Detail 1
+
+## Linked Nodes
+- [[PROJECT_MAP]]
+`;
+
+  const pPath = path.join(templatesDir, "Project_Template.md");
+  const ePath = path.join(templatesDir, "Entity_Template.md");
+
+  if (!fs.existsSync(pPath)) fs.writeFileSync(pPath, projectTemplate, "utf-8");
+  if (!fs.existsSync(ePath)) fs.writeFileSync(ePath, entityTemplate, "utf-8");
+}
+
+function seedInstructions(): void {
+  const instructionsPath = path.join(KNOWLEDGE_PATH, ".librarian", "INSTRUCTIONS.md");
+  const oldConstitutionPath = path.join(KNOWLEDGE_PATH, ".librarian", "CONSTITUTION.md");
+  const geminiPath = path.join(KNOWLEDGE_PATH, "GEMINI.md");
+
+  const coreStartMarker = "<!-- LIBRARIAN_CORE_START -->";
+  const coreEndMarker = "<!-- LIBRARIAN_CORE_END -->";
+
+  const coreInstructions = `${coreStartMarker}
+# 📜 LIBRARIAN KNOWLEDGE OS: CORE INSTRUCTIONS (v1.1)
+
+> **LAW #0: THE LIBRARIAN MONOPOLY.** 
+> Any modification to files within this Hub (excluding the \`raw/\` directory) MUST be performed exclusively through Librarian MCP tools. Manual manipulation or use of generic file tools is strictly forbidden. This applies to both content and system configurations.
+
+## 1. The Write Protocol (MANDATORY)
+- **FORBIDDEN:** Using standard file system tools (e.g., \`write_file\`, \`replace\`, \`create_or_update_file\`) from other sources.
+- **MANDATORY:** Use ONLY \`librarian-hub-mcp\` and \`librarian-git-mcp\` tools for ALL modifications.
+- **ISOLATION:** All changes to the \`wiki/\` directory MUST be performed in isolated \`draft/*\` Git branches.
+
+## 2. Knowledge Architecture
+- 📂 **raw/**: The "Sandbox". Open for manual ingestion and raw data dumps.
+- 📂 **wiki/**: The "Sanctuary". Managed exclusively by Librarian. Requires structured Markdown with YAML metadata (tags, sources) and bidirectional Wikilinks.
+- 📂 **.librarian/**: The "Engine". System layer for rules and automation. Do not modify unless explicitly requested by the owner.
+
+## 3. Maintenance & Integrity
+- **HEALTH CHECK:** Always run \`check_health\` before finalizing any drafting session.
+- **DE-DUPLICATION:** Use \`semantic_search\` or \`grep_search\` before creating new nodes.
+- **VALIDATION:** Run \`validate_content\` before writing to ensure metadata compliance.
+
+*Violating these rules leads to architectural degradation of the Knowledge Hub.*
+${coreEndMarker}`;
+
+  let migrationNeeded = false;
+  let legacyRules = "";
+
+  // 1. Handle legacy CONSTITUTION.md
+  if (fs.existsSync(oldConstitutionPath)) {
+    const legacyContent = fs.readFileSync(oldConstitutionPath, "utf-8");
+    if (!legacyContent.includes("LIBRARIAN KNOWLEDGE OS: CORE INSTRUCTIONS")) {
+      legacyRules = `\n\n## 🪵 Legacy Custom Rules\n\n> [!caution] ACTION REQUIRED\n> The following rules were found in your legacy Constitution. Please merge them into the core sections or Local Settings.\n\n${legacyContent}`;
+      migrationNeeded = true;
+      fs.renameSync(oldConstitutionPath, oldConstitutionPath + ".bak");
+    }
+  }
+
+  // 2. Handle root GEMINI.md
+  if (fs.existsSync(geminiPath)) {
+    migrationNeeded = true;
+    fs.unlinkSync(geminiPath);
+  }
+
+  // 3. Write or Update INSTRUCTIONS.md
+  if (!fs.existsSync(instructionsPath)) {
+    fs.writeFileSync(instructionsPath, `${coreInstructions}${legacyRules}\n\n## 🏛️ Local Hub Settings\n*No local settings defined yet.*`, "utf-8");
+  } else {
+    let currentContent = fs.readFileSync(instructionsPath, "utf-8");
+    const hasMarkers = currentContent.includes(coreStartMarker) && currentContent.includes(coreEndMarker);
+
+    if (hasMarkers) {
+      const regex = new RegExp(`${coreStartMarker}[\\s\\S]*?${coreEndMarker}`, "g");
+      currentContent = currentContent.replace(regex, coreInstructions);
+      fs.writeFileSync(instructionsPath, currentContent, "utf-8");
+    } else {
+      // AGGRESSIVE HEALING: If markers are missing, we check if it's an old core version
+      if (currentContent.includes("LIBRARIAN KNOWLEDGE OS: CORE INSTRUCTIONS")) {
+        console.error("Found legacy instructions without markers. Upgrading to v1.1 with protection markers...");
+        // Strip the old header/version lines and wrap the rest as Local Settings or just replace if it was purely system
+        const localPart = currentContent.split(/## 2\. Knowledge Architecture|## 3\. Maintenance/)[0].includes("##") 
+          ? currentContent 
+          : "*Legacy content merged during migration.*";
+        
+        fs.writeFileSync(instructionsPath, `${coreInstructions}\n\n## 🏛️ Local Hub Settings (Migrated)\n${legacyRules}\n\n${localPart}`, "utf-8");
+      } else {
+        // Just prepend to unknown file
+        fs.writeFileSync(instructionsPath, `${coreInstructions}\n\n${legacyRules}\n\n${currentContent}`, "utf-8");
+      }
+    }
+  }
+
+  // 4. Update config with migration flag
+  if (migrationNeeded && fs.existsSync(CONFIG_PATH)) {
+    try {
+      const currentConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+      currentConfig.migration_pending = true;
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(currentConfig, null, 2));
+    } catch (e) {
+      console.error("Failed to update config during migration:", e);
+    }
+  }
+}
+
 function initializeHub(): void {
   // 1. Legacy Migration (v1 -> v2)
   const legacyMetaPath = path.join(KNOWLEDGE_PATH, "meta");
@@ -145,6 +285,10 @@ function initializeHub(): void {
     execSync("git init", { cwd: KNOWLEDGE_PATH });
     console.error("Initialized new Git repository in Hub.");
   }
+
+  // 7. Seed AI Instructions & Templates
+  seedInstructions();
+  seedTemplates();
 }
 
 initializeHub();
@@ -163,9 +307,9 @@ mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
     resources: [
       {
-        uri: "librarian://.librarian/GEMINI.md",
-        name: "Librarian Constitution",
-        description: "The core rules and philosophy of the Knowledge Hub.",
+        uri: "librarian://.librarian/INSTRUCTIONS.md",
+        name: "Librarian Core Instructions",
+        description: "Mandatory structural and procedural rules for all AI agents. Read this first.",
         mimeType: "text/markdown",
       },
       {
@@ -208,14 +352,14 @@ mcpServer.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
-      { name: "read_file", description: "Read file from knowledge base.", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
-      { name: "write_file_raw", description: "Directly write content to a file (use with caution).", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
-      { name: "grep_search", description: "Fast keyword search using grep.", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
-      { name: "validate_content", description: "Validate content against the Librarian Constitution.", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
-      { name: "apply_template", description: "Apply a template to the content based on file path.", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
-      { name: "check_health", description: "Comprehensive health and structural audit of the knowledge hub.", inputSchema: { type: "object", properties: {} } },
-      { name: "apply_cleanup", description: "Delete specific structural violations from the hub root. Use after careful evaluation.", inputSchema: { type: "object", properties: { items: { type: "array", items: { type: "string" }, description: "List of filenames/directories to delete (must be structural violations)." } }, required: ["items"] } },
-      { name: "update_project_map", description: "Update the global project map file.", inputSchema: { type: "object", properties: {} } },
+      { name: "read_file", description: "The MANDATORY way to read files from the Knowledge Hub. Ensures environment-agnostic paths.", inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] } },
+      { name: "write_file_raw", description: "THE ONLY PERMITTED WAY to write to the Knowledge Hub. Bypasses standard FS tools. Use ONLY within the Librarian Protocol (Branch -> Validate -> Write).", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
+      { name: "grep_search", description: "Fast keyword search using grep. Preferred for structural discovery.", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
+      { name: "validate_content", description: "MANDATORY: Validate content against the Librarian Instructions before any write operation.", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
+      { name: "apply_template", description: "Enforce structural standards by applying a template to the content based on file path.", inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } },
+      { name: "check_health", description: "CRITICAL: Run this to verify if your intended changes violate the Knowledge OS integrity before committing.", inputSchema: { type: "object", properties: {} } },
+      { name: "apply_cleanup", description: "Administrative tool to purge structural violations. Use with extreme caution after health check.", inputSchema: { type: "object", properties: { items: { type: "array", items: { type: "string" }, description: "List of filenames/directories to delete (must be structural violations)." } }, required: ["items"] } },
+      { name: "update_project_map", description: "Synchronize the global project map with current filesystem state.", inputSchema: { type: "object", properties: {} } },
     ],
   };
 });

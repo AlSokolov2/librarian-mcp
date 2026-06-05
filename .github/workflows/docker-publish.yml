@@ -53,6 +53,15 @@ jobs:
   update-description:
     needs: build-and-push
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - image: alsokolov2/librarian-hub-mcp
+            short: "Librarian Hub MCP: Core file management, integrity audits, and smart templating."
+          - image: alsokolov2/librarian-git-mcp
+            short: "Librarian Git MCP: Atomic Git operations and change isolation for AI agents."
+          - image: alsokolov2/librarian-search-mcp
+            short: "Librarian Search MCP: Semantic AI-powered search and high-speed regex lookup."
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -61,6 +70,24 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: alsokolov2/librarian-hub-mcp
-          short-description: "Librarian Hub MCP: Core file management and Git-aware health audits."
+          repository: ${{ matrix.image }}
+          short-description: ${{ matrix.short }}
           readme-filepath: ./DOCKERHUB.md
+
+  create-github-release:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Release Notes
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
