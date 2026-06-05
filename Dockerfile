@@ -7,30 +7,42 @@ WORKDIR /app
 
 # --- STAGE 2: Builder ---
 FROM base AS builder
-COPY package*.json tsconfig.json ./
+COPY package*.json tsconfig*.json ./
+COPY packages ./packages
 RUN npm install
-COPY src ./src
 RUN npm run build
 
-# --- STAGE 3: Production (The Actual Image) ---
-FROM base AS production
-
-# Настраиваем пользователя ПЕРЕД копированием и установкой
+# --- STAGE 3: Hub Production ---
+FROM base AS hub-production
 RUN mkdir -p /app/knowledge-hub && chown -R node:node /app
 USER node
-
-# Копируем артефакты сборки с правильными правами (одним слоем)
 COPY --chown=node:node --from=builder /app/package*.json ./
-COPY --chown=node:node --from=builder /app/build ./build
+COPY --chown=node:node --from=builder /app/packages/librarian-shared ./packages/librarian-shared
+COPY --chown=node:node --from=builder /app/packages/librarian-hub-mcp ./packages/librarian-hub-mcp
+RUN npm install --omit=dev --workspace=@librarian/hub-mcp && npm cache clean --force
+ENV KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+CMD ["node", "packages/librarian-hub-mcp/build/index.js"]
 
-# Устанавливаем зависимости и чистим кэш в одной команде
-RUN npm install --omit=dev && npm cache clean --force
-
-# Настраиваем Git (уже под пользователем node)
+# --- STAGE 4: Git Production ---
+FROM base AS git-production
+RUN mkdir -p /app/knowledge-hub && chown -R node:node /app
+USER node
+COPY --chown=node:node --from=builder /app/package*.json ./
+COPY --chown=node:node --from=builder /app/packages/librarian-git-mcp ./packages/librarian-git-mcp
+RUN npm install --omit=dev --workspace=@librarian/git-mcp && npm cache clean --force
 RUN git config --global user.name "AI Librarian" && \
     git config --global user.email "librarian@knowledge-hub.local" && \
     git config --global --add safe.directory /app/knowledge-hub
-
 ENV KNOWLEDGE_HUB_PATH=/app/knowledge-hub
-EXPOSE 3000
-CMD ["node", "build/index.js"]
+CMD ["node", "packages/librarian-git-mcp/build/index.js"]
+
+# --- STAGE 5: Search Production ---
+FROM base AS search-production
+RUN mkdir -p /app/knowledge-hub && chown -R node:node /app
+USER node
+COPY --chown=node:node --from=builder /app/package*.json ./
+COPY --chown=node:node --from=builder /app/packages/librarian-shared ./packages/librarian-shared
+COPY --chown=node:node --from=builder /app/packages/librarian-search-mcp ./packages/librarian-search-mcp
+RUN npm install --omit=dev --workspace=@librarian/search-mcp && npm cache clean --force
+ENV KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+CMD ["node", "packages/librarian-search-mcp/build/index.js"]
