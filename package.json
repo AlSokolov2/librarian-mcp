@@ -13,7 +13,8 @@
     "build": "tsc --build",
     "clean": "tsc --build --clean",
     "test": "vitest run",
-    "lint": "eslint packages/*/src/**/*.ts"
+    "lint": "eslint packages/*/src/**/*.ts",
+    "setup": "node scripts/setup.js"
   },
   "keywords": [
     "mcp",
