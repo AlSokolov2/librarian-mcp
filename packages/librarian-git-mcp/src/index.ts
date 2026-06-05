@@ -7,7 +7,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { execSync } from "child_process";
 import * as fs from "fs";
-import * as path from "path";
 
 // --- CONFIGURATION ---
 let KNOWLEDGE_PATH = process.env.KNOWLEDGE_HUB_PATH || "";
@@ -87,35 +86,35 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   try {
     if (name === "git_branch_list") {
-      const { pattern } = args as any;
+      const { pattern } = args as Record<string, string | undefined>;
       const cmd = pattern ? `git branch --list '${pattern}'` : "git branch";
       return { content: [{ type: "text", text: execHubCommand(cmd).trim() || "No branches found." }] };
     }
     if (name === "git_branch_create") {
-      const { name: bName, from = "master" } = args as any;
+      const { name: bName, from = "master" } = args as Record<string, string | undefined>;
       execHubCommand(`git checkout -b "${bName}" "${from}"`);
       return { content: [{ type: "text", text: `Branch '${bName}' created from '${from}'.` }] };
     }
     if (name === "git_branch_delete") {
-      const { name: bName, force = false } = args as any;
+      const { name: bName, force = false } = args as Record<string, string | boolean | undefined>;
       const flag = force ? "-D" : "-d";
       execHubCommand(`git branch ${flag} "${bName}"`);
       return { content: [{ type: "text", text: `Branch '${bName}' deleted.` }] };
     }
     if (name === "git_checkout") {
-      const { name: bName } = args as any;
+      const { name: bName } = args as Record<string, string | undefined>;
       execHubCommand(`git checkout "${bName}"`);
       return { content: [{ type: "text", text: `Switched to branch '${bName}'.` }] };
     }
     if (name === "git_commit") {
-      const { message, files } = args as any;
-      const filesToStage = files.join(" ");
+      const { message, files } = args as Record<string, unknown>;
+      const filesToStage = Array.isArray(files) ? files.join(" ") : String(files);
       execHubCommand(`git add ${filesToStage}`);
       execHubCommand(`git commit -m "${message}"`);
       return { content: [{ type: "text", text: `Committed changes with message: ${message}` }] };
     }
     if (name === "git_merge") {
-      const { from, message, no_ff = true } = args as any;
+      const { from, message, no_ff = true } = args as Record<string, string | boolean | undefined>;
       const ffFlag = no_ff ? "--no-ff" : "";
       const msgFlag = message ? `-m "${message}"` : "";
       execHubCommand(`git merge ${from} ${ffFlag} ${msgFlag}`);
@@ -138,3 +137,4 @@ async function run() {
 }
 
 run().catch(console.error);
+

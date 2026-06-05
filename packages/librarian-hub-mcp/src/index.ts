@@ -108,7 +108,7 @@ function initializeHub(): void {
     try {
       const saved = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
       currentConfig = { ...DEFAULT_CONFIG, ...saved };
-    } catch (e) {
+    } catch {
       console.error("Config corrupted, resetting to defaults.");
     }
   }
@@ -307,7 +307,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
           return false;
         });
-      } catch (e) {
+      } catch {
         console.error("Git audit failed");
       }
 
@@ -351,7 +351,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
            try {
              execSync(`git rm -r --cached "${item}"`, { cwd: KNOWLEDGE_PATH });
              gitPurged.push(item);
-           } catch (e) {
+           } catch {
              ignored.push(item + " (git-rm failed)");
            }
            return;
@@ -372,7 +372,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       // 2. Final Sync: stage all legitimate deletions and additions
       try {
         execSync("git add -A", { cwd: KNOWLEDGE_PATH });
-      } catch (e) {
+      } catch {
         console.error("Final git sync failed");
       }
       
