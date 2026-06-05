@@ -26,3 +26,4 @@ meta/vectors/
 # OS Files
 .DS_Store
 Thumbs.db
+.gemini
