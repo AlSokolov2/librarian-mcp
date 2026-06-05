@@ -7,5 +7,10 @@
 
 ## Standards
 - Follow Conventional Commits.
-- Maintain 100% test coverage for core logic.
+- Use **Git Flow** for all code changes (feature/develop/master).
+- Maintain 100% test coverage for core logic in `@librarian/shared`.
 - Documentation must be updated alongside code changes.
+
+## Architecture
+- **Monorepo**: Managed via npm workspaces.
+- **Atomic Services**: Tools are split into Hub, Git, and Search microservices.

@@ -7,9 +7,42 @@ export interface LibrarianConfig {
   required_yaml_fields: string[];
   auto_update_date: true;
   main_branch: string;
-  enable_http_api: boolean;
-  api_port: number;
-  api_key: string;
+  hub_version: number;
+  allowed_text_extensions: string[];
+}
+
+export const ALLOWED_ROOT_DIRS = ["wiki", "raw", ".librarian", ".git", ".obsidian"];
+export const ALLOWED_ROOT_FILES = ["README.md", ".gitignore"];
+
+/**
+ * Находит файлы и папки, нарушающие структуру корня
+ */
+export function getStructuralViolations(knowledgePath: string): string[] {
+  if (!fs.existsSync(knowledgePath)) return [];
+  const rootItems = fs.readdirSync(knowledgePath);
+  return rootItems.filter(item => {
+    return !ALLOWED_ROOT_DIRS.includes(item) && !ALLOWED_ROOT_FILES.includes(item);
+  });
+}
+
+/**
+ * Находит дублирующиеся вики-ссылки в контенте
+ */
+export function getDuplicateLinks(content: string): string[] {
+  const links = content.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  links.forEach(link => {
+    const target = link.replace(/[[\]]/g, "").split("|")[0].trim();
+    if (seen.has(target)) {
+      duplicates.add(target);
+    } else {
+      seen.add(target);
+    }
+  });
+
+  return Array.from(duplicates);
 }
 
 /**
@@ -82,7 +115,7 @@ export function applyTemplateIfNew(
 
   const fileName = path.basename(relPath, ".md");
   const templateName = relPath.includes("Projects/") ? "Project_Template.md" : "Entity_Template.md";
-  const templatePath = path.join(knowledgePath, "meta", "templates", templateName);
+  const templatePath = path.join(knowledgePath, ".librarian", "templates", templateName);
   
   if (!fs.existsSync(templatePath)) return incomingContent;
 

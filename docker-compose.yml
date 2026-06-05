@@ -1,10 +1,10 @@
 services:
-  librarian-mcp:
+  librarian-hub:
     build:
       context: .
-      target: production
-    image: librarian-mcp:latest
-    container_name: librarian-mcp
+      target: hub-production
+    image: librarian-hub-mcp:latest
+    container_name: librarian-hub-mcp
     user: "${USER_ID}:${GROUP_ID}"
     volumes:
       - ${KNOWLEDGE_HUB_PATH}:/app/knowledge-hub
@@ -12,6 +12,40 @@ services:
       - .env
     environment:
       - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
-    ports:
-      - "${PORT}:${PORT}"
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+  librarian-git:
+    build:
+      context: .
+      target: git-production
+    image: librarian-git-mcp:latest
+    container_name: librarian-git-mcp
+    user: "${USER_ID}:${GROUP_ID}"
+    volumes:
+      - ${KNOWLEDGE_HUB_PATH}:/app/knowledge-hub
+    env_file:
+      - .env
+    environment:
+      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+  librarian-search:
+    build:
+      context: .
+      target: search-production
+    image: librarian-search-mcp:latest
+    container_name: librarian-search-mcp
+    user: "${USER_ID}:${GROUP_ID}"
+    volumes:
+      - ${KNOWLEDGE_HUB_PATH}:/app/knowledge-hub
+    env_file:
+      - .env
+    environment:
+      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
+    stdin_open: true
+    tty: true
     restart: unless-stopped
