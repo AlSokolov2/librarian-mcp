@@ -6,6 +6,23 @@ Unlike traditional RAG systems that merely retrieve fragments, Librarian MCP ena
 
 ---
 
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    User([User / Obsidian]) <--> Hub[(Knowledge Hub\nMarkdown + Git)]
+    subgraph "Librarian Atomic Suite"
+        Hub_MCP[Librarian Hub MCP] <--> Hub
+        Git_MCP[Librarian Git MCP] <--> Hub
+        Search_MCP[Librarian Search MCP] <--> Hub
+    end
+    AI_Agent([AI Agent / Gemini-CLI / Cursor]) <--> Hub_MCP
+    AI_Agent <--> Git_MCP
+    AI_Agent <--> Search_MCP
+```
+
+---
+
 ## 🏗️ The Microservice Suite
 
 ### 🛡️ Librarian Hub (`librarian-hub-mcp`)
