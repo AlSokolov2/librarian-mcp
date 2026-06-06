@@ -5,21 +5,9 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import * as lancedb from "@lancedb/lancedb";
-import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
-
-// --- TYPES & INTERFACES ---
-
-interface SearchArgs {
-  query: string;
-}
-
-interface EmbeddingOutput {
-  data: number[] | Float32Array;
-}
+import { SearchManager } from "./core/SearchManager.js";
 
 // --- CONFIGURATION ---
 let KNOWLEDGE_PATH = process.env.KNOWLEDGE_HUB_PATH || "";
@@ -34,20 +22,11 @@ if (!KNOWLEDGE_PATH) {
 
 const DB_PATH = path.join(KNOWLEDGE_PATH, ".librarian", "vectors");
 
-// --- AI STATE ---
-let extractor: FeatureExtractionPipeline | null = null;
-
-async function getEmbedding(text: string): Promise<number[]> {
-  if (!extractor) {
-    console.error("Loading embedding model: Xenova/all-MiniLM-L6-v2...");
-    extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-  }
-  const output = (await extractor(text, { pooling: "mean", normalize: true })) as EmbeddingOutput;
-  return Array.from(output.data);
-}
+// --- INITIALIZATION ---
+const searchManager = new SearchManager(KNOWLEDGE_PATH, DB_PATH);
 
 const mcpServer = new Server(
-  { name: "librarian-search-mcp", version: "3.0.0" },
+  { name: "librarian-search-mcp", version: "4.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -55,8 +34,20 @@ const mcpServer = new Server(
 mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
-      { name: "semantic_search", description: "Pure AI semantic search across knowledge base.", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } },
-      { name: "reindex_all", description: "Perform full re-indexing of all wiki files for semantic search.", inputSchema: { type: "object", properties: {} } },
+      { 
+        name: "semantic_search", 
+        description: "Pure AI semantic search across knowledge base.", 
+        inputSchema: { 
+          type: "object", 
+          properties: { query: { type: "string" } }, 
+          required: ["query"] 
+        } 
+      },
+      { 
+        name: "reindex_all", 
+        description: "Perform full re-indexing of all wiki files for semantic search.", 
+        inputSchema: { type: "object", properties: {} } 
+      },
     ],
   };
 });
@@ -65,28 +56,13 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   try {
     if (name === "semantic_search") {
-      const searchArgs = args as unknown as SearchArgs;
-      const db = await lancedb.connect(DB_PATH);
-      const tableExists = (await db.tableNames()).includes("knowledge_chunks");
-      if (!tableExists) return { content: [{ type: "text", text: "Vector database not initialized. Run reindex_all first." }], isError: true };
-      
-      const table = await db.openTable("knowledge_chunks");
-      const results = await table.search(await getEmbedding(searchArgs.query)).limit(5).toArray();
-      const text = results.map(r => `[Score: ${Math.round((r._distance as number) * 100) / 100}] ${r.path}:\n${String(r.text).substring(0, 300)}...`).join("\n\n---\n\n");
-      return { content: [{ type: "text", text: text || "No results." }] };
+      const { query } = args as { query: string };
+      const result = await searchManager.semanticSearch(query);
+      return { content: [{ type: "text", text: result }] };
     }
     if (name === "reindex_all") {
-      const db = await lancedb.connect(DB_PATH);
-      const wikiRoot = path.join(KNOWLEDGE_PATH, "wiki");
-      const files = execSync(`find "${wikiRoot}" -name "*.md"`).toString().split("\n").filter(Boolean);
-      const chunks = [];
-      for (const file of files) {
-        const rel = path.relative(KNOWLEDGE_PATH, file);
-        const fileContent = fs.readFileSync(file, "utf-8");
-        chunks.push({ vector: await getEmbedding(fileContent), text: fileContent.substring(0, 5000), path: rel });
-      }
-      await db.createTable("knowledge_chunks", chunks, { mode: "overwrite" });
-      return { content: [{ type: "text", text: `Re-indexed ${chunks.length} files.` }] };
+      const result = await searchManager.reindexAll();
+      return { content: [{ type: "text", text: result }] };
     }
     throw new Error(`Unknown tool: ${name}`);
   } catch (error: unknown) {

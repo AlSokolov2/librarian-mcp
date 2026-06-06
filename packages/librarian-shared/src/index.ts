@@ -149,3 +149,56 @@ export function applyTemplateIfNew(
 
   return matter.stringify(finalBody, finalData);
 }
+
+/**
+ * Resolves Git conflict markers using the Accumulative Merge protocol (preserving both versions in Markdown).
+ */
+export function resolveConflictsMarkdown(content: string, sourceBranch: string): string {
+  // Regex to match standard git conflict markers
+  const conflictRegex = /<<<<<<< HEAD([\s\S]*?)=======([\s\S]*?)>>>>>>> .*/g;
+
+  return content.replace(conflictRegex, (match, versionA, versionB) => {
+    return `<!-- LIBRARIAN_CONFLICT_START -->
+> [!CAUTION] CONFLICT: Draft vs ${sourceBranch}
+> **Version A (Current Draft):**
+${versionA.trim().split("\n").map((line: string) => `> ${line}`).join("\n")}
+>
+> ---
+> **Version B (Incoming ${sourceBranch}):**
+${versionB.trim().split("\n").map((line: string) => `> ${line}`).join("\n")}
+<!-- LIBRARIAN_CONFLICT_END -->`;
+  });
+}
+
+export type StrayFileCategory = "GHOST" | "NODE" | "SOURCE" | "TRASH";
+
+/**
+ * Classifies a stray file found in the root directory.
+ */
+export function classifyStrayFile(
+  fileName: string,
+  content: string,
+  wikiFileBaseNames: string[],
+  allowedExtensions: string[]
+): StrayFileCategory {
+  const baseName = path.basename(fileName, ".md");
+  const ext = path.extname(fileName).toLowerCase();
+
+  // 1. Ghost Duplicate (exists in wiki)
+  if (wikiFileBaseNames.includes(baseName)) {
+    return "GHOST";
+  }
+
+  // 2. Misplaced Node (has YAML)
+  if (ext === ".md" && content.trim().startsWith("---")) {
+    return "NODE";
+  }
+
+  // 3. Raw Source (text-based but no YAML)
+  if (allowedExtensions.includes(ext)) {
+    return "SOURCE";
+  }
+
+  return "TRASH";
+}
+
