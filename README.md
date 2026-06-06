@@ -1,18 +1,23 @@
-# 📚 Librarian MCP: The Atomic Knowledge OS (v4.0.0)
+# 📚 Librarian MCP: The Atomic Knowledge OS (v5.0.0)
 
 **Librarian MCP** is an intelligent orchestration layer for your personal knowledge base, inspired by Andrej Karpathy's [LLM Wiki vision](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). It transforms a simple folder of Markdown files into a dynamic, structured, and safe "digital brain" accessible via the **Model Context Protocol (MCP)**.
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Architecture: Modular & Layered
+
+Librarian v5/v6 features a professional **Clean Architecture**. Every microservice is split into three layers:
+- 📂 **`core/`**: Pure business logic (Manager classes) decoupled from protocols.
+- 📂 **`bootstrap/`**: Self-healing initialization and migration routines.
+- 📄 **`index.ts`**: Thin orchestrators for the MCP SDK.
 
 ```mermaid
 graph TD
     User([User / Obsidian]) <--> Hub[(Knowledge Hub\nMarkdown + Git)]
-    subgraph "Librarian Atomic Suite"
-        Hub_MCP[Librarian Hub MCP] <--> Hub
-        Git_MCP[Librarian Git MCP] <--> Hub
-        Search_MCP[Librarian Search MCP] <--> Hub
+    subgraph "Librarian Modular Suite"
+        Hub_MCP[Librarian Hub] <--> Hub
+        Git_MCP[Librarian Git] <--> Hub
+        Search_MCP[Librarian Search] <--> Hub
     end
     AI_Agent([AI Agent / Gemini-CLI / Cursor]) <--> Hub_MCP
     AI_Agent <--> Git_MCP
@@ -21,46 +26,61 @@ graph TD
 
 ---
 
-## 🏛️ v4: The Librarian Monopoly Architecture
+## 🏛️ The Two-Branch Protocol (State Machine)
 
-Librarian v4 introduces a strict **Knowledge Integrity Protocol**. At its heart is **Law #0**: 
+Librarian v5 treats your knowledge hub as a robust state machine. To ensure architectural integrity, we enforce the **Two-Branch Protocol**:
 
-> *Any modification to the Knowledge Hub (excluding the `raw/` directory) MUST be performed exclusively through Librarian MCP tools. Manual manipulation or use of generic file tools is strictly forbidden.*
+1.  **`master` (Crystallized)**: The immutable source of truth. Stable, indexed, and ready for consumption.
+2.  **`draft` (Active Session)**: The ONLY legal space for modifications. All AI interactions accumulate here.
 
-This architecture ensures that your "digital brain" remains healthy, consistent, and fully versioned by forcing all AI agents to adhere to the same high structural standards.
+**Consolidation sessions** automatically detect "illegal" branches and merge them into the `draft` using the **Accumulative Merge** strategy.
+
+---
+
+## 🛡️ Core Protocols
+
+### 🔄 Accumulative Merge
+Librarian never destroys knowledge during conflicts. Instead of traditional Git merge conflicts, we use **Non-Destructive Markdown Callouts**. Conflicting versions are wrapped in GitHub-compatible blocks:
+> [!CAUTION] CONFLICT: Draft vs Incoming
+> **Version A (Draft):** ...
+> **Version B (Incoming):** ...
+
+### 🧹 Smart Curation Protocol
+The Hub root directory is kept strictly clean. Librarian classifies stray files into:
+- **GHOSTS**: Redundant empty files of existing nodes (automatically deleted).
+- **NODES**: Misplaced wiki entries with YAML metadata (moved to `wiki/`).
+- **SOURCES**: Raw data or text logs (moved to `raw/`).
 
 ---
 
 ## 🏗️ The Microservice Suite
 
 ### 🛡️ Librarian Hub (`alsokolov2/librarian-hub-mcp`)
-The **Hub** is the guardian of your files and the master of structure.
-- **FS Health**: Enforces naming conventions and audits structural integrity.
-- **Auto-Compliance**: Automatically seeds `.librarian/INSTRUCTIONS.md` and templates.
-- **Self-Healing**: Marker-based system protects core rules while allowing local settings.
+The **Hub** is the guardian of structure.
+- **Smart Audit**: Classifies and curates root directory items.
+- **Validation**: Enforces naming conventions and YAML requirements.
+- **Templates**: Automatic project and entity scaffolding.
 
 ### 📜 Librarian Git (`alsokolov2/librarian-git-mcp`)
-The **Git** service is the guardian of versions.
-- **Safety**: Isolates changes in `draft/*` branches.
-- **Primitives**: Provides atomic Git operations for AI agents.
+The **Git** service is the guardian of state.
+- **State Control**: Manages the Master/Draft lifecycle.
+- **Atomic Commits**: Structured, auditable change history.
 
 ### 🧠 Librarian Search (`alsokolov2/librarian-search-mcp`)
 The **Search** service is the intellectual layer.
-- **Semantic Search**: Fully local AI (Transformers.js + LanceDB).
-- **Keyword Search**: Blazing fast regex-based lookup.
+- **Semantic Search**: Fully local RAG (Transformers.js + LanceDB).
+- **Global Indexing**: Unified searchable map of your digital brain.
 
 ---
 
 ## 🚀 Quick Start (Docker Compose)
 
-The easiest way to run the suite is using Docker Compose:
-
 ```yaml
 services:
   librarian-hub:
     image: alsokolov2/librarian-hub-mcp:latest
-    container_name: librarian-hub-mcp
-    user: "1000:1000" # Run 'id -u' and 'id -g'
+    container_name: librarian-hub
+    user: "1000:1000"
     volumes:
       - /path/to/your/notes:/app/knowledge-hub
     environment:
@@ -71,19 +91,7 @@ services:
 
   librarian-git:
     image: alsokolov2/librarian-git-mcp:latest
-    container_name: librarian-git-mcp
-    user: "1000:1000"
-    volumes:
-      - /path/to/your/notes:/app/knowledge-hub
-    environment:
-      - KNOWLEDGE_HUB_PATH=/app/knowledge-hub
-    stdin_open: true
-    tty: true
-    restart: unless-stopped
-
-  librarian-search:
-    image: alsokolov2/librarian-search-mcp:latest
-    container_name: librarian-search-mcp
+    container_name: librarian-git
     user: "1000:1000"
     volumes:
       - /path/to/your/notes:/app/knowledge-hub
@@ -96,32 +104,11 @@ services:
 
 ---
 
-## 🔒 Hybrid Git Standard
-Librarian implements a **"Text-Heavy, Binary-Light"** standard:
-*   **Tracked**: `.md`, `.txt`, `.json`, `.php`, `.js`, `.py`, `.yaml`, etc.
-*   **Ignored**: `.pdf`, `.png`, `.jpg`, `.zip` and UI settings (`.obsidian/`).
-
----
-
-## 🎓 Knowledge Manager Skill
-This repository includes a **Gemini CLI Skill** located in `.gemini/skills/knowledge-manager`. Activate it to help the AI agent coordinate the ecosystem effectively.
-
----
-
-## 🛠️ Development & Releases
-We use **Conventional Commits** and automated release management.
-
+## 🛠️ Development
 ```bash
-# Install dependencies
 npm install
-
-# Build all microservices
 npm run build
-
-# Run tests
 npm test
-
-# Prepare a release (bumps version, updates CHANGELOG.md)
 npm run release
 ```
 

@@ -1,6 +1,6 @@
 {
   "name": "@librarian/search-mcp",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "main": "build/index.js",
@@ -11,7 +11,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@lancedb/lancedb": "^0.30.0",
-    "@librarian/shared": "*",
+    "@librarian/shared": "5.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^17.4.2"
   }

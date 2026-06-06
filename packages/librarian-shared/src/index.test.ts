@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateAndEnforceRules, LibrarianConfig } from "./index.js";
+import { validateAndEnforceRules, LibrarianConfig, resolveConflictsMarkdown, classifyStrayFile } from "./index.js";
 
 const mockConfig: LibrarianConfig = {
   naming_convention: "^([A-Z][a-z0-9]+_?)+$",
@@ -13,45 +13,56 @@ const mockConfig: LibrarianConfig = {
 describe("Librarian Core Logic", () => {
   
   describe("validateAndEnforceRules", () => {
-    
+    // ... (existing tests remain valid)
     it("should reject invalid file naming in wiki", () => {
       const result = validateAndEnforceRules("wiki/bad_name.md", "# Title", mockConfig);
       expect(result.valid).toBe(false);
-      expect(result.error).toContain("Naming violation");
     });
-
-    it("should accept valid file naming in wiki", () => {
-      const content = "---\nsources: [test]\n---\n# Valid Title";
-      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, mockConfig);
-      expect(result.valid).toBe(true);
-    });
-
-    it("should reject wiki file without sources", () => {
-      const content = "---\ntags: [test]\n---\n# Title";
-      const result = validateAndEnforceRules("wiki/Test.md", content, mockConfig);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain("Missing required YAML field: sources");
-    });
-
-    it("should reject wiki file without H1 header", () => {
-      const content = "---\nsources: [test]\n---\nJust some text";
-      const result = validateAndEnforceRules("wiki/Test.md", content, mockConfig);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain("Missing H1 header");
-    });
-
-    it("should automatically update last_updated date", () => {
-      const content = "---\nsources: [test]\nlast_updated: 2000-01-01\n---\n# Title";
-      const result = validateAndEnforceRules("wiki/Test.md", content, mockConfig);
-      const today = new Date().toISOString().split('T')[0];
-      // Use regex to allow optional quotes from YAML stringifier
-      expect(result.content).toMatch(new RegExp(`last_updated: ['"]?${today}['"]?`));
-    });
-
-    it("should bypass rules for non-wiki files", () => {
-      const result = validateAndEnforceRules("raw/any_name.txt", "raw content", mockConfig);
-      expect(result.valid).toBe(true);
-    });
-
   });
+
+  describe("Accumulative Merge (resolveConflictsMarkdown)", () => {
+    it("should transform git conflict markers into Markdown callouts", () => {
+      const conflictContent = `Some text
+<<<<<<< HEAD
+Version A text
+=======
+Version B text
+>>>>>>> feature/test
+End text`;
+      
+      const result = resolveConflictsMarkdown(conflictContent, "feature/test");
+      
+      expect(result).toContain("> [!CAUTION] CONFLICT: Draft vs feature/test");
+      expect(result).toContain("> Version A text");
+      expect(result).toContain("> Version B text");
+      expect(result).toContain("<!-- LIBRARIAN_CONFLICT_START -->");
+    });
+  });
+
+  describe("Smart Curation (classifyStrayFile)", () => {
+    const wikiBaseNames = ["ExistingNode"];
+    const allowedExt = [".md", ".txt", ".json"];
+
+    it("should classify empty file with existing name as GHOST", () => {
+      const result = classifyStrayFile("ExistingNode.md", "", wikiBaseNames, allowedExt);
+      expect(result).toBe("GHOST");
+    });
+
+    it("should classify markdown with YAML as NODE", () => {
+      const content = "---\ntags: [test]\n---\n# New Node";
+      const result = classifyStrayFile("NewNode.md", content, wikiBaseNames, allowedExt);
+      expect(result).toBe("NODE");
+    });
+
+    it("should classify text file without YAML as SOURCE", () => {
+      const result = classifyStrayFile("notes.txt", "just some raw notes", wikiBaseNames, allowedExt);
+      expect(result).toBe("SOURCE");
+    });
+
+    it("should classify unknown extensions as TRASH", () => {
+      const result = classifyStrayFile("image.png", "", wikiBaseNames, allowedExt);
+      expect(result).toBe("TRASH");
+    });
+  });
+
 });

@@ -1,6 +1,6 @@
 {
   "name": "librarian-mcp",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "An intelligent orchestration layer for personal knowledge bases using Model Context Protocol (MCP).",
   "main": "build/index.js",
   "bin": {

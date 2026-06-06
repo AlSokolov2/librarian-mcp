@@ -28,6 +28,7 @@ FROM base AS git-production
 RUN mkdir -p /app/knowledge-hub && chown -R node:node /app
 USER node
 COPY --chown=node:node --from=builder /app/package*.json ./
+COPY --chown=node:node --from=builder /app/packages/librarian-shared ./packages/librarian-shared
 COPY --chown=node:node --from=builder /app/packages/librarian-git-mcp ./packages/librarian-git-mcp
 RUN npm install --omit=dev --workspace=@librarian/git-mcp && npm cache clean --force
 RUN git config --global user.name "AI Librarian" && \
