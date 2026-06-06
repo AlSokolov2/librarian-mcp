@@ -37,7 +37,7 @@ const hubConfig: LibrarianConfig = fs.existsSync(CONFIG_PATH)
 const hubManager = new HubManager(KNOWLEDGE_PATH, hubConfig);
 
 const mcpServer = new Server(
-  { name: "librarian-hub-mcp", version: "5.1.0" },
+  { name: "librarian-hub-mcp", version: "5.0.0" },
   { capabilities: { tools: {}, resources: {} } }
 );
 

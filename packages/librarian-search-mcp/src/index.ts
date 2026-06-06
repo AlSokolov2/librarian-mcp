@@ -26,7 +26,7 @@ const DB_PATH = path.join(KNOWLEDGE_PATH, ".librarian", "vectors");
 const searchManager = new SearchManager(KNOWLEDGE_PATH, DB_PATH);
 
 const mcpServer = new Server(
-  { name: "librarian-search-mcp", version: "4.0.0" },
+  { name: "librarian-search-mcp", version: "5.0.0" },
   { capabilities: { tools: {} } }
 );
 
