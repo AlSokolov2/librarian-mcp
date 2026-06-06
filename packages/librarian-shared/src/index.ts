@@ -12,8 +12,16 @@ export interface LibrarianConfig {
   migration_pending?: boolean;
 }
 
+export interface GitAuditResult {
+  current_branch: string;
+  illegal_branches: string[];
+  is_dirty: boolean;
+}
+
 export const ALLOWED_ROOT_DIRS = ["wiki", "raw", ".librarian", ".git", ".obsidian"];
 export const ALLOWED_ROOT_FILES = ["README.md", ".gitignore"];
+
+export const MANDATORY_BRANCHES = ["master", "draft"];
 
 /**
  * Находит файлы и папки, нарушающие структуру корня

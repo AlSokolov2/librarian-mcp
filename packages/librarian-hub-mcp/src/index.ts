@@ -38,7 +38,7 @@ interface SearchArgs {
 }
 
 // --- CONFIGURATION & STANDARDS ---
-const LATEST_HUB_VERSION = 4;
+const LATEST_HUB_VERSION = 5;
 
 const DEFAULT_CONFIG: LibrarianConfig = {
   naming_convention: "^([A-Z][a-z0-9]+_?)+$", // Capitalized_Snake_Case
@@ -141,25 +141,24 @@ function seedInstructions(): void {
   const coreEndMarker = "<!-- LIBRARIAN_CORE_END -->";
 
   const coreInstructions = `${coreStartMarker}
-# 📜 LIBRARIAN KNOWLEDGE OS: CORE INSTRUCTIONS (v1.1)
+# 📜 LIBRARIAN KNOWLEDGE OS: CORE INSTRUCTIONS (v1.2)
 
 > **LAW #0: THE LIBRARIAN MONOPOLY.** 
-> Any modification to files within this Hub (excluding the \`raw/\` directory) MUST be performed exclusively through Librarian MCP tools. Manual manipulation or use of generic file tools is strictly forbidden. This applies to both content and system configurations.
+> Any modification to files within this Hub (excluding the \`raw/\` directory) MUST be performed exclusively through Librarian MCP tools. Manual manipulation or use of generic file tools is strictly forbidden.
 
-## 1. The Write Protocol (MANDATORY)
-- **FORBIDDEN:** Using standard file system tools (e.g., \`write_file\`, \`replace\`, \`create_or_update_file\`) from other sources.
-- **MANDATORY:** Use ONLY \`librarian-hub-mcp\` and \`librarian-git-mcp\` tools for ALL modifications.
-- **ISOLATION:** All changes to the \`wiki/\` directory MUST be performed in isolated \`draft/*\` Git branches.
+## 1. Two-Branch Protocol (State Machine)
+- **Master**: The immutable source of truth. Stable and peer-reviewed.
+- **Draft**: The ONLY active editing session. All work accumulates here via commits.
+- **Consolidation**: Any other branch is illegal and will be merged into \`draft\` via Accumulative Merge.
 
 ## 2. Knowledge Architecture
 - 📂 **raw/**: The "Sandbox". Open for manual ingestion and raw data dumps.
-- 📂 **wiki/**: The "Sanctuary". Managed exclusively by Librarian. Requires structured Markdown with YAML metadata (tags, sources) and bidirectional Wikilinks.
-- 📂 **.librarian/**: The "Engine". System layer for rules and automation. Do not modify unless explicitly requested by the owner.
+- 📂 **wiki/**: The "Sanctuary". Managed exclusively by Librarian. Requires YAML metadata and Wikilinks.
+- 📂 **.librarian/**: The "Engine". System layer for rules and automation.
 
 ## 3. Maintenance & Integrity
 - **HEALTH CHECK:** Always run \`check_health\` before finalizing any drafting session.
-- **DE-DUPLICATION:** Use \`semantic_search\` or \`grep_search\` before creating new nodes.
-- **VALIDATION:** Run \`validate_content\` before writing to ensure metadata compliance.
+- **NON-DESTRUCTIVE MERGE:** Conflicts are resolved by preserving BOTH versions in Markdown blocks.
 
 *Violating these rules leads to architectural degradation of the Knowledge Hub.*
 ${coreEndMarker}`;
@@ -215,6 +214,7 @@ ${coreEndMarker}`;
   if (migrationNeeded && fs.existsSync(CONFIG_PATH)) {
     try {
       const currentConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+      currentConfig.hub_version = 5;
       currentConfig.migration_pending = true;
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(currentConfig, null, 2));
     } catch (e) {
@@ -257,6 +257,9 @@ function initializeHub(): void {
   if (currentConfig.hub_version < LATEST_HUB_VERSION) {
     console.error(`Upgrading Hub from v${currentConfig.hub_version} to v${LATEST_HUB_VERSION}`);
     currentConfig.hub_version = LATEST_HUB_VERSION;
+    if (currentConfig.hub_version === 5) {
+      console.error("v5 Migration: Enabling Git Structural Audit...");
+    }
   }
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(currentConfig, null, 2));
 
@@ -298,7 +301,7 @@ const hubConfig: LibrarianConfig = fs.existsSync(CONFIG_PATH)
   : DEFAULT_CONFIG;
 
 const mcpServer = new Server(
-  { name: "librarian-hub-mcp", version: "3.0.0" },
+  { name: "librarian-hub-mcp", version: "5.1.0" },
   { capabilities: { tools: {}, resources: {} } }
 );
 
@@ -430,27 +433,53 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
-      // NEW: Git Index Audit
+      // SMART CURATION CLASSIFICATION
+      const ghosts: string[] = [];
+      const misplacedNodes: string[] = [];
+      const rawSources: string[] = [];
+      const technicalTrash: string[] = [];
+
+      strayFiles.forEach(file => {
+        const fullPath = path.join(KNOWLEDGE_PATH, file);
+        if (!fs.existsSync(fullPath)) return;
+
+        const baseName = path.basename(file, ".md");
+        const ext = path.extname(file).toLowerCase();
+        
+        // 1. Check for Ghost Duplicate (exists in wiki)
+        const isGhost = fileBaseNames.includes(baseName);
+        if (isGhost) {
+          ghosts.push(file);
+          return;
+        }
+
+        // 2. Check for Misplaced Node (has YAML)
+        const content = fs.readFileSync(fullPath, "utf-8");
+        if (ext === ".md" && content.trim().startsWith("---")) {
+          misplacedNodes.push(file);
+          return;
+        }
+
+        // 3. Check for Raw Source (text-based but no YAML)
+        if (hubConfig.allowed_text_extensions.includes(ext)) {
+          rawSources.push(file);
+          return;
+        }
+
+        // 4. Everything else is Trash
+        technicalTrash.push(file);
+      });
+
+      // NEW: Git Structural Audit (Two-Branch Protocol)
       let gitDirty = false;
-      let trackedViolations: string[] = [];
+      let illegalBranches: string[] = [];
+      let currentBranch = "master";
       try {
         const status = execSync("git status --short", { cwd: KNOWLEDGE_PATH }).toString();
         gitDirty = status.length > 0;
-        
-        // Find files that ARE tracked but SHOULD BE ignored
-        const trackedFiles = execSync("git ls-files", { cwd: KNOWLEDGE_PATH }).toString().split("\n").filter(Boolean);
-        trackedViolations = trackedFiles.filter(f => {
-          // Block UI/IDE settings
-          if (f.startsWith(".obsidian/") || f.startsWith(".idea/") || f.startsWith(".vscode/")) return true;
-          // Block Librarian internals
-          if (f.startsWith(".librarian/")) return true;
-          // Block raw binaries, allow text
-          if (f.startsWith("raw/")) {
-            const ext = path.extname(f).toLowerCase();
-            return !hubConfig.allowed_text_extensions.includes(ext);
-          }
-          return false;
-        });
+        currentBranch = execSync("git branch --show-current", { cwd: KNOWLEDGE_PATH }).toString().trim();
+        const allBranches = execSync("git branch", { cwd: KNOWLEDGE_PATH }).toString().split("\n").map(b => b.trim().replace("* ", ""));
+        illegalBranches = allBranches.filter(b => b && b !== "master" && b !== "draft" && !b.startsWith("(HEAD"));
       } catch {
         console.error("Git audit failed");
       }
@@ -458,40 +487,48 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       const report = [
         "--- LIBRARIAN HUB HEALTH REPORT ---",
         `Project Map Status: ${projectMapExists ? "OK" : "MISSING (CRITICAL)"}`,
-        `Git Index Status: ${gitDirty ? "DIRTY (Action Required)" : "CLEAN"}`,
+        `Current Branch: ${currentBranch}`,
+        `Illegal Branches Found: ${illegalBranches.length}`,
+        `Git Index Status: ${gitDirty ? "DIRTY" : "CLEAN"}`,
         `Broken links: ${brokenLinks.length}`,
-        `Duplicates: ${allDuplicates.length}`,
         `Orphans: ${orphans.length}`,
-        `Structural Violations: ${strayFiles.length + trackedViolations.length}`,
+        `Stray Items in Root: ${strayFiles.length}`,
         "",
-        brokenLinks.length > 0 ? "Broken Links:\n" + brokenLinks.join("\n") : "",
-        allDuplicates.length > 0 ? "\nDuplicate Links:\n" + allDuplicates.join("\n") : "",
+        illegalBranches.length > 0 ? "!!! ILLEGAL BRANCHES FOUND (MANDATORY CONSOLIDATION REQUIRED) !!!\n" + illegalBranches.map(b => `- ${b}`).join("\n") : "",
+        ghosts.length > 0 ? "!!! GHOST DUPLICATES FOUND (RECOMMEND: DELETE) !!!\n" + ghosts.map(f => `- ${f} (Exists in wiki/)`).join("\n") : "",
+        misplacedNodes.length > 0 ? "!!! MISPLACED NODES FOUND (RECOMMEND: MOVE TO WIKI) !!!\n" + misplacedNodes.map(f => `- ${f}`).join("\n") : "",
+        rawSources.length > 0 ? "!!! UNPROCESSED SOURCES FOUND (RECOMMEND: MOVE TO RAW) !!!\n" + rawSources.map(f => `- ${f}`).join("\n") : "",
+        technicalTrash.length > 0 ? "!!! TECHNICAL TRASH FOUND (RECOMMEND: DELETE) !!!\n" + technicalTrash.map(f => `- ${f}`).join("\n") : "",
+        brokenLinks.length > 0 ? "\nBroken Links:\n" + brokenLinks.join("\n") : "",
         orphans.length > 0 ? "\nOrphaned Nodes: " + orphans.join(", ") : "",
-        (strayFiles.length > 0 || trackedViolations.length > 0) ? "\n!!! STRUCTURAL VIOLATIONS !!!" : "",
-        strayFiles.length > 0 ? "\n[FS] Untracked/Illegal objects in root:\n" + strayFiles.map(f => `- ${f}`).join("\n") : "",
-        trackedViolations.length > 0 ? "\n[GIT] Unauthorized tracked files (must be cached-removed):\n" + trackedViolations.slice(0, 10).map(f => `- ${f}`).join("\n") + (trackedViolations.length > 10 ? `\n... and ${trackedViolations.length - 10} more` : "") : "",
-        (strayFiles.length > 0 || trackedViolations.length > 0 || gitDirty) ? "\nRECOMMENDATION: Use 'apply_cleanup' to purge illegal objects and synchronize Git index." : "Status: ARCHITECTURAL INTEGRITY VERIFIED."
+        (illegalBranches.length > 0) ? "\nRECOMMENDATION: Use 'git_consolidate_branches' to enforce Two-Branch Protocol." : 
+        (strayFiles.length > 0) ? "\nRECOMMENDATION: Use 'apply_cleanup' to resolve stray files (ghosts will be deleted, others moved)." :
+        (gitDirty) ? "\nRECOMMENDATION: Commit changes to crystallize state." : "Status: ARCHITECTURAL INTEGRITY VERIFIED."
       ].filter(Boolean).join("\n");
 
       return { content: [{ type: "text", text: report }] };
     }
     if (name === "apply_cleanup") {
       const { items } = args as { items: string[] };
-      const strayFiles = getStructuralViolations(KNOWLEDGE_PATH);
+      const wikiFiles = execSync(`find "${path.join(KNOWLEDGE_PATH, "wiki")}" -name "*.md"`).toString().split("\n").filter(Boolean);
+      const fileBaseNames = wikiFiles.map(f => path.basename(f, ".md"));
+      
       const deleted: string[] = [];
+      const moved: string[] = [];
       const gitPurged: string[] = [];
       const ignored: string[] = [];
       
-      // 1. Process FS and Git-cached items
       items.forEach(item => {
         const full = path.join(KNOWLEDGE_PATH, item);
-        
-        // Handle explicit Git Index Purge
+        if (!fs.existsSync(full) && !item.startsWith(".")) {
+          ignored.push(item + " (not found)");
+          return;
+        }
+
+        // 1. Handle explicit Git Index Purge for system files
         const isUI = item.startsWith(".obsidian") || item.startsWith(".idea") || item.startsWith(".vscode");
         const isInternal = item.startsWith(".librarian");
-        const isRawBinary = item.startsWith("raw") && !hubConfig.allowed_text_extensions.includes(path.extname(item).toLowerCase());
-
-        if (isUI || isInternal || isRawBinary) {
+        if (isUI || isInternal) {
            try {
              execSync(`git rm -r --cached "${item}"`, { cwd: KNOWLEDGE_PATH });
              gitPurged.push(item);
@@ -501,30 +538,51 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
            return;
         }
 
-        if (strayFiles.includes(item) && fs.existsSync(full)) {
-          if (fs.statSync(full).isDirectory()) {
-            fs.rmSync(full, { recursive: true, force: true });
-          } else {
-            fs.unlinkSync(full);
-          }
-          deleted.push(item);
-        } else {
-          ignored.push(item);
+        const baseName = path.basename(item, ".md");
+        const ext = path.extname(item).toLowerCase();
+
+        // 2. Logic: Ghost -> Delete
+        if (fileBaseNames.includes(baseName)) {
+          fs.unlinkSync(full);
+          deleted.push(item + " (Ghost)");
+          return;
         }
+
+        // 3. Logic: Node -> Move to wiki/_Global/
+        const content = fs.readFileSync(full, "utf-8");
+        if (ext === ".md" && content.trim().startsWith("---")) {
+          const dest = path.join(KNOWLEDGE_PATH, "wiki", "_Global", item);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.renameSync(full, dest);
+          moved.push(`${item} -> wiki/_Global/`);
+          return;
+        }
+
+        // 4. Logic: Source -> Move to raw/
+        if (hubConfig.allowed_text_extensions.includes(ext)) {
+          const dest = path.join(KNOWLEDGE_PATH, "raw", item);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.renameSync(full, dest);
+          moved.push(`${item} -> raw/`);
+          return;
+        }
+
+        // 5. Logic: Technical Trash -> Delete
+        if (fs.statSync(full).isDirectory()) {
+          fs.rmSync(full, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(full);
+        }
+        deleted.push(item + " (Trash)");
       });
 
-      // 2. Final Sync: stage all legitimate deletions and additions
-      try {
-        execSync("git add -A", { cwd: KNOWLEDGE_PATH });
-      } catch {
-        console.error("Final git sync failed");
-      }
+      // Sync index
+      try { execSync("git add -A", { cwd: KNOWLEDGE_PATH }); } catch {}
       
-      let msg = `CLEANUP RESULT:\n- FS Deleted: ${deleted.length} items.`;
-      if (gitPurged.length > 0) msg += `\n- Git Index Purged: ${gitPurged.join(", ")}`;
-      if (deleted.length > 0) msg += ` (${deleted.join(", ")})`;
-      if (ignored.length > 0) msg += `\nWarning: ignored/failed ${ignored.length} items: ${ignored.join(", ")}`;
-      msg += "\n\nNote: All changes staged. You MUST call git_commit to finalize.";
+      let msg = `SMART CLEANUP RESULT:\n- Deleted: ${deleted.length} items.\n- Moved: ${moved.length} items.`;
+      if (gitPurged.length > 0) msg += `\n- Git Purged: ${gitPurged.length} items.`;
+      if (moved.length > 0) msg += `\nDetails (Moved):\n` + moved.map(m => `- ${m}`).join("\n");
+      if (deleted.length > 0) msg += `\nDetails (Deleted):\n` + deleted.map(d => `- ${d}`).join("\n");
       
       return { content: [{ type: "text", text: msg }] };
     }
