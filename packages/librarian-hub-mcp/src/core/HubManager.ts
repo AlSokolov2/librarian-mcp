@@ -98,6 +98,9 @@ export class HubManager {
       const fullPath = path.join(this.knowledgePath, file);
       if (!fs.existsSync(fullPath)) return;
 
+      // --- BUGFIX: Check if it's a file before reading to avoid EISDIR ---
+      if (!fs.statSync(fullPath).isFile()) return;
+
       const content = fs.readFileSync(fullPath, "utf-8");
       const category = classifyStrayFile(
         file,
@@ -211,13 +214,19 @@ export class HubManager {
         return;
       }
 
-      const content = fs.readFileSync(full, "utf-8");
-      const category = classifyStrayFile(
-        item,
-        content,
-        fileBaseNames,
-        this.hubConfig.allowed_text_extensions
-      );
+      // --- BUGFIX: Only read content if it's a file ---
+      const isFile = fs.statSync(full).isFile();
+      let category = "TRASH";
+      
+      if (isFile) {
+        const content = fs.readFileSync(full, "utf-8");
+        category = classifyStrayFile(
+          item,
+          content,
+          fileBaseNames,
+          this.hubConfig.allowed_text_extensions
+        );
+      }
 
       if (category === "GHOST") {
         fs.unlinkSync(full);
