@@ -23,6 +23,11 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Configure Git Identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Install Dependencies
         run: npm install
 
