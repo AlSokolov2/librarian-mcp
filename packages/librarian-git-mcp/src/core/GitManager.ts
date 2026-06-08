@@ -152,8 +152,33 @@ export class GitManager {
     return report;
   }
 
+  private getIsolatedItems(): string[] {
+    const gitignorePath = path.join(this.knowledgePath, ".gitignore");
+    if (!fs.existsSync(gitignorePath)) return [];
+
+    const content = fs.readFileSync(gitignorePath, "utf-8");
+    const sectionHeader = "# LIBRARIAN ISOLATED ARTIFACTS";
+    const index = content.indexOf(sectionHeader);
+    if (index === -1) return [];
+
+    return content
+      .slice(index + sectionHeader.length)
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith("#"));
+  }
+
   public commit(message: string, files: string[] | string): string {
-    const filesToStage = Array.isArray(files) ? files.join(" ") : String(files);
+    const filesArray = Array.isArray(files) ? files : [files];
+    const isolatedItems = this.getIsolatedItems();
+    
+    // Explicitly block staging of isolated artifacts
+    const forbidden = filesArray.filter(f => isolatedItems.includes(f) || isolatedItems.some(i => f.startsWith(i + '/')));
+    if (forbidden.length > 0) {
+      throw new Error(`Cannot commit isolated artifacts: ${forbidden.join(", ")}. These are protected by the Isolation Protocol.`);
+    }
+
+    const filesToStage = filesArray.join(" ");
     this.execCommand(`git add ${filesToStage}`);
     this.execCommand(`git commit -m "${message}"`);
     return `Committed changes with message: ${message}`;

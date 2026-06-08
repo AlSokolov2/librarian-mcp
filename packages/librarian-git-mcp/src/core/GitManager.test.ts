@@ -8,7 +8,7 @@ describe("GitManager Cold Start", () => {
   let tempHubPath: string;
 
   beforeEach(() => {
-    tempHubPath = path.join(os.tmpdir(), `librarian-test-${Date.now()}`);
+    tempHubPath = path.join(os.tmpdir(), `librarian-test-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`);
     fs.mkdirSync(tempHubPath, { recursive: true });
   });
 
@@ -40,5 +40,23 @@ describe("GitManager Cold Start", () => {
     expect(() => {
       gitManager.getStatus();
     }).toThrow(/Git command failed: git status/);
+  });
+
+  it("should block commit of isolated artifacts", () => {
+    const gitManager = new GitManager(tempHubPath);
+    gitManager.ensureDraft();
+    
+    // Create an isolated artifact
+    fs.writeFileSync(path.join(tempHubPath, ".gemini"), "test data");
+    const gitignorePath = path.join(tempHubPath, ".gitignore");
+    fs.writeFileSync(gitignorePath, "\n# LIBRARIAN ISOLATED ARTIFACTS\n.gemini\n");
+
+    expect(() => {
+      gitManager.commit("test", [".gemini"]);
+    }).toThrow(/Cannot commit isolated artifacts: \.gemini/);
+    
+    expect(() => {
+      gitManager.commit("test", ".gemini/config.json");
+    }).toThrow(/Cannot commit isolated artifacts: \.gemini\/config\.json/);
   });
 });
