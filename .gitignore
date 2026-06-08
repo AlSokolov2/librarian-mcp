@@ -29,3 +29,9 @@ meta/vectors/
 Thumbs.db
 .gemini
 coverage/
+
+# Temporary Files
+commit_message.txt
+*.temp
+*.tmp
+

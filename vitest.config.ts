@@ -19,7 +19,9 @@ export default defineConfig({
         'build/**',
         '**/*.test.ts',
         'eslint.config.js',
-        'packages/*/src/index.ts', // Index files often just export
+        'packages/librarian-git-mcp/src/index.ts',
+        'packages/librarian-hub-mcp/src/index.ts',
+        'packages/librarian-search-mcp/src/index.ts',
       ],
     },
   },

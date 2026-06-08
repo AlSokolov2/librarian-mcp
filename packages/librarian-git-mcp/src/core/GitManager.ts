@@ -3,11 +3,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { resolveConflictsMarkdown } from "@librarian/shared";
 
-interface GitError extends Error {
-  stdout?: Buffer | string;
-  stderr?: Buffer | string;
-}
-
 export class GitManager {
   private knowledgePath: string;
 
@@ -21,11 +16,12 @@ export class GitManager {
         cwd: this.knowledgePath,
         stdio: ["ignore", "pipe", "pipe"] 
       }).toString();
-    } catch (error: any) {
-      const stderr = error.stderr?.toString().trim() || "";
-      const stdout = error.stdout?.toString().trim() || "";
-      const message = error.message || "Unknown error";
-      throw new Error(`Git command failed: ${command}\n${stderr || stdout || message}`);
+    } catch (error: unknown) {
+      const err = error as Record<string, unknown>;
+      const stderr = (err.stderr as Buffer | undefined)?.toString().trim() || "";
+      const stdout = (err.stdout as Buffer | undefined)?.toString().trim() || "";
+      const message = (err.message as string | undefined) || "Unknown error";
+      throw new Error(`Git command failed: ${command}\n${stderr || stdout || message}`, { cause: error });
     }
   }
 
@@ -35,7 +31,6 @@ export class GitManager {
     }
 
     try {
-      // Check if there is at least one commit
       this.execCommand("git rev-parse --verify HEAD");
     } catch {
       // Empty repository - perform cold start
@@ -54,19 +49,24 @@ export class GitManager {
       }
 
       this.execCommand("git add .");
-      // Set identity for cold start if not configured
+      
       try {
         this.execCommand("git config user.name 'Librarian Hub'");
         this.execCommand("git config user.email 'librarian@example.com'");
       } catch {
         // Ignore config errors
       }
-      
       this.execCommand('git commit -m "feat: initial knowledge base setup"');
+    }
+
+    // Ensure the initial branch is named 'master'
+    const current = this.showCurrentBranch();
+    if (current && current !== "master") {
+      const branches = this.execCommand("git branch")
+        .split("\n")
+        .map((b) => b.trim().replace("* ", ""));
       
-      // Ensure the initial branch is named 'master'
-      const current = this.showCurrentBranch();
-      if (current && current !== "master") {
+      if (!branches.includes("master")) {
         this.execCommand(`git branch -m ${current} master`);
       }
     }
@@ -84,7 +84,7 @@ export class GitManager {
   public getBranchList(pattern?: string): string {
     const cmd = pattern ? `git branch --list '${pattern}'` : "git branch";
     try {
-      return this.execCommand(cmd).trim() || "No branches found.";
+      return this.execCommand(cmd).trim();
     } catch {
       return "No branches found (empty repository).";
     }
@@ -100,9 +100,11 @@ export class GitManager {
 
   public ensureDraft(): string {
     this.ensureInitialCommit();
-    const branches = this.execCommand("git branch")
-      .split("\n")
-      .map((b) => b.trim().replace("* ", ""));
+    const branchesOutput = this.execCommand("git branch");
+    const branches = branchesOutput.split("\n");
+    for (let i = 0; i < branches.length; i++) {
+      branches[i] = branches[i].trim().replace("* ", "");
+    }
     
     if (branches.includes("draft")) {
       this.execCommand("git checkout draft");
