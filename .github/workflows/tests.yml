@@ -8,7 +8,6 @@ on:
 
 jobs:
   test:
-    name: "Zero-Tolerance Quality Gates"
     runs-on: ubuntu-latest
 
     steps:
