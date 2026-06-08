@@ -28,3 +28,4 @@ meta/vectors/
 .DS_Store
 Thumbs.db
 .gemini
+coverage/
