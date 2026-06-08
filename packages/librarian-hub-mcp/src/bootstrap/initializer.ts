@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import { execSync } from "child_process";
 import { type LibrarianConfig } from "@librarian/shared";
 
@@ -92,7 +93,7 @@ export function seedInstructions(knowledgePath: string, configPath: string): voi
   const coreEndMarker = "<!-- LIBRARIAN_CORE_END -->";
 
   const coreInstructions = `${coreStartMarker}
-# 📜 LIBRARIAN KNOWLEDGE OS: CORE INSTRUCTIONS (v1.2)
+# 📜 LIBRARIAN KNOWLEDGE OS: CORE INSTRUCTIONS (v1.3)
 
 > **LAW #0: THE LIBRARIAN MONOPOLY.** 
 > Any modification to files within this Hub (excluding the \`raw/\` directory) MUST be performed exclusively through Librarian MCP tools. Manual manipulation or use of generic file tools is strictly forbidden.
@@ -110,6 +111,11 @@ export function seedInstructions(knowledgePath: string, configPath: string): voi
 ## 3. Maintenance & Integrity
 - **HEALTH CHECK:** Always run \`check_health\` before finalizing any drafting session.
 - **NON-DESTRUCTIVE MERGE:** Conflicts are resolved by preserving BOTH versions in Markdown blocks.
+
+## 4. Border Control Protocol (Cross-Hub Security)
+- Before executing any file write or modifying shell command OUTSIDE the primary Hub directory, you MUST read the target directory's \`.librarian/config.json\`. 
+- If the \`hub_id\` found there differs from the one returned by your \`get_hub_info\` tool, you are in a foreign jurisdiction.
+- You MUST refuse any write operations and inform the user that you only have Read-Only access to external hubs.
 
 *Violating these rules leads to architectural degradation of the Knowledge Hub.*
 ${coreEndMarker}`;
@@ -200,15 +206,74 @@ export function initializeHub(knowledgePath: string, configPath: string, project
     }
   });
 
-  // 3. Config Enforcement
+  // 3. Config Enforcement & Hub Identity Protocol
   let currentConfig = { ...DEFAULT_CONFIG };
   if (fs.existsSync(configPath)) {
-    try {
-      const saved = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      currentConfig = { ...DEFAULT_CONFIG, ...saved };
-    } catch {
-      console.error("Config corrupted, resetting to defaults.");
+    const rawConfig = fs.readFileSync(configPath, "utf-8");
+    
+    // --- IDENTITY SPLIT HANDLING (JSON CONFLICT RESOLUTION) ---
+    if (rawConfig.includes("<<<<<<< HEAD")) {
+      console.error("Detected Git conflict in config.json. Applying Identity Split resolution...");
+      const conflictRegex = /<<<<<<< HEAD([\s\S]*?)=======([\s\S]*?)>>>>>>> .*/g;
+      const matches = [...rawConfig.matchAll(conflictRegex)];
+      
+      if (matches.length > 0) {
+        try {
+          const versionA = JSON.parse(matches[0][1]);
+          const versionB = JSON.parse(matches[0][2]);
+          
+          const idA = versionA.hub_id;
+          const idB = versionB.hub_id;
+          
+          let winningId = idA;
+          let losingId = idB;
+          
+          // Deterministic selection (e.g., lexical sort) to ensure both sides pick the same winner
+          if (idA && idB && idA !== idB) {
+            if (idB > idA) {
+              winningId = idB;
+              losingId = idA;
+            }
+            console.error(`Resolved Identity Split: Winner (${winningId}), Loser preserved as alias (${losingId})`);
+          }
+          
+          // Merge configurations (prioritizing Version A as base)
+          currentConfig = { ...DEFAULT_CONFIG, ...versionA, hub_id: winningId };
+          currentConfig.hub_aliases = Array.from(new Set([
+            ...(versionA.hub_aliases || []), 
+            ...(versionB.hub_aliases || []),
+            losingId
+          ])).filter(Boolean);
+          
+          // Rewrite the resolved config
+          fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
+          
+          // Auto-commit the resolution
+          execSync("git add .librarian/config.json", { cwd: knowledgePath, stdio: "ignore" });
+          execSync("git commit -m \"chore(system): resolve Identity Split in config.json\"", { cwd: knowledgePath, stdio: "ignore" });
+          
+        } catch (e) {
+          console.error("Failed to parse conflicted config JSON. Resetting to defaults.", e);
+        }
+      }
+    } else {
+      // Normal JSON Parsing
+      try {
+        const saved = JSON.parse(rawConfig);
+        currentConfig = { ...DEFAULT_CONFIG, ...saved };
+      } catch {
+        console.error("Config corrupted, resetting to defaults.");
+      }
     }
+  }
+
+  // Generate Hub ID if missing
+  let identityGenerated = false;
+  if (!currentConfig.hub_id) {
+    currentConfig.hub_id = `hub-${crypto.randomUUID()}`;
+    currentConfig.hub_aliases = currentConfig.hub_aliases || [];
+    identityGenerated = true;
+    console.error(`Generated new Hub Identity: ${currentConfig.hub_id}`);
   }
 
   // Ensure we always have the latest version in memory
@@ -220,6 +285,29 @@ export function initializeHub(knowledgePath: string, configPath: string, project
     }
   }
   fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
+
+  // 3.5 System Commit for Identity (if generated)
+  if (identityGenerated && fs.existsSync(path.join(knowledgePath, ".git"))) {
+    try {
+      const currentBranch = execSync("git branch --show-current", { cwd: knowledgePath }).toString().trim();
+      
+      // Temporarily switch to master to stamp identity
+      if (currentBranch !== "master") {
+        execSync("git checkout master", { cwd: knowledgePath, stdio: "ignore" });
+      }
+      
+      execSync("git add .librarian/config.json", { cwd: knowledgePath, stdio: "ignore" });
+      execSync(`git commit -m "chore(system): assign unique hub identity ${currentConfig.hub_id}"`, { cwd: knowledgePath, stdio: "ignore" });
+      
+      // Return to original branch and merge identity
+      if (currentBranch !== "master") {
+        execSync(`git checkout ${currentBranch}`, { cwd: knowledgePath, stdio: "ignore" });
+        execSync("git merge master -m \"chore(system): sync hub identity from master\"", { cwd: knowledgePath, stdio: "ignore" });
+      }
+    } catch (e) {
+      console.error("Failed to commit system identity. Ensure git is configured.", e);
+    }
+  }
 
   // 4. Project Map Enforcement
   const projectMapFullPath = path.join(knowledgePath, projectMapRelPath);

@@ -92,6 +92,11 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
+        name: "get_hub_info",
+        description: "Returns the jurisdictional identity of this Knowledge Hub (ID, aliases, root path). Call this to verify you are in the correct workspace.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
         name: "read_file",
         description: "The MANDATORY way to read files from the Knowledge Hub. Ensures environment-agnostic paths.",
         inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
@@ -151,6 +156,21 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "isolate_artifacts",
+        description: "Administrative tool to permanently ignore persistent local contamination (e.g. .gemini). Adds paths to .gitignore.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: { type: "string" },
+              description: "List of filenames/directories to isolate.",
+            },
+          },
+          required: ["items"],
+        },
+      },
+      {
         name: "update_project_map",
         description: "Synchronize the global project map with current filesystem state.",
         inputSchema: { type: "object", properties: {} },
@@ -163,6 +183,14 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
   try {
     switch (name) {
+      case "get_hub_info": {
+        const info = {
+          absolute_path: KNOWLEDGE_PATH,
+          hub_id: hubConfig.hub_id || "uninitialized",
+          hub_aliases: hubConfig.hub_aliases || [],
+        };
+        return { content: [{ type: "text", text: JSON.stringify(info, null, 2) }] };
+      }
       case "read_file": {
         const { path: relPath } = args as { path: string };
         try {
@@ -199,6 +227,11 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "apply_cleanup": {
         const { items } = args as { items: string[] };
         const result = hubManager.applyCleanup(items);
+        return { content: [{ type: "text", text: result }] };
+      }
+      case "isolate_artifacts": {
+        const { items } = args as { items: string[] };
+        const result = hubManager.isolateArtifacts(items);
         return { content: [{ type: "text", text: result }] };
       }
       case "update_project_map": {

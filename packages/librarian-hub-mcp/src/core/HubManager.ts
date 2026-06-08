@@ -79,6 +79,9 @@ export class HubManager {
     const strayFiles = getStructuralViolations(this.knowledgePath);
     const projectMapExists = fs.existsSync(path.join(this.knowledgePath, PROJECT_MAP_REL_PATH));
 
+    const isolatedItems = this.getIsolatedItems();
+    const activeStrayFiles = strayFiles.filter(f => !isolatedItems.includes(f));
+
     const allDuplicates: string[] = [];
     for (const file of wikiFiles) {
       const fileContent = fs.readFileSync(file, "utf-8");
@@ -94,9 +97,12 @@ export class HubManager {
     const rawSources: string[] = [];
     const technicalTrash: string[] = [];
 
-    strayFiles.forEach((file) => {
+    activeStrayFiles.forEach((file) => {
       const fullPath = path.join(this.knowledgePath, file);
       if (!fs.existsSync(fullPath)) return;
+
+      // --- BUGFIX: Check if it's a file before reading to avoid EISDIR ---
+      if (!fs.statSync(fullPath).isFile()) return;
 
       const content = fs.readFileSync(fullPath, "utf-8");
       const category = classifyStrayFile(
@@ -141,7 +147,8 @@ export class HubManager {
       `Git Index Status: ${gitDirty ? "DIRTY" : "CLEAN"}`,
       `Broken links: ${brokenLinks.length}`,
       `Orphans: ${orphans.length}`,
-      `Stray Items in Root: ${strayFiles.length}`,
+      `Stray Items in Root: ${activeStrayFiles.length}`,
+      `Isolated Items: ${isolatedItems.length}`,
       "",
       illegalBranches.length > 0
         ? "!!! ILLEGAL BRANCHES FOUND (MANDATORY CONSOLIDATION REQUIRED) !!!\n" +
@@ -163,14 +170,20 @@ export class HubManager {
         ? "!!! TECHNICAL TRASH FOUND (RECOMMEND: DELETE) !!!\n" +
           technicalTrash.map((f) => `- ${f}`).join("\n")
         : "",
+      isolatedItems.length > 0
+        ? "!!! ISOLATED VIOLATIONS PRESENT (STATUS: STAINED) !!!\n" +
+          isolatedItems.map((f) => `- ${f} (Ignored by Git)`).join("\n")
+        : "",
       brokenLinks.length > 0 ? "\nBroken Links:\n" + brokenLinks.join("\n") : "",
       orphans.length > 0 ? "\nOrphaned Nodes: " + orphans.join(", ") : "",
       illegalBranches.length > 0
         ? "\nRECOMMENDATION: Use 'git_consolidate_branches' to enforce Two-Branch Protocol."
-        : strayFiles.length > 0
-        ? "\nRECOMMENDATION: Use 'apply_cleanup' to resolve stray files (ghosts will be deleted, others moved)."
+        : activeStrayFiles.length > 0
+        ? "\nRECOMMENDATION: Use 'apply_cleanup' to resolve stray files (ghosts will be deleted, others moved, or use 'isolate' to ignore)."
         : gitDirty
         ? "\nRECOMMENDATION: Commit changes to crystallize state."
+        : isolatedItems.length > 0
+        ? "Status: STAINED (Isolated violations present)."
         : "Status: ARCHITECTURAL INTEGRITY VERIFIED.",
     ]
       .filter(Boolean)
@@ -191,10 +204,17 @@ export class HubManager {
     const gitPurged: string[] = [];
     const ignored: string[] = [];
 
+    const isolatedItems = this.getIsolatedItems();
+
     items.forEach((item) => {
       const full = path.join(this.knowledgePath, item);
       if (!fs.existsSync(full) && !item.startsWith(".")) {
         ignored.push(item + " (not found)");
+        return;
+      }
+
+      if (isolatedItems.includes(item)) {
+        ignored.push(item + " (protected by isolation)");
         return;
       }
 
@@ -211,13 +231,19 @@ export class HubManager {
         return;
       }
 
-      const content = fs.readFileSync(full, "utf-8");
-      const category = classifyStrayFile(
-        item,
-        content,
-        fileBaseNames,
-        this.hubConfig.allowed_text_extensions
-      );
+      // --- BUGFIX: Only read content if it's a file ---
+      const isFile = fs.statSync(full).isFile();
+      let category = "TRASH";
+      
+      if (isFile) {
+        const content = fs.readFileSync(full, "utf-8");
+        category = classifyStrayFile(
+          item,
+          content,
+          fileBaseNames,
+          this.hubConfig.allowed_text_extensions
+        );
+      }
 
       if (category === "GHOST") {
         fs.unlinkSync(full);
@@ -255,6 +281,51 @@ export class HubManager {
     if (deleted.length > 0) msg += `\nDetails (Deleted):\n` + deleted.map((d) => `- ${d}`).join("\n");
 
     return msg;
+  }
+
+  public isolateArtifacts(items: string[]): string {
+    const gitignorePath = path.join(this.knowledgePath, ".gitignore");
+    let content = "";
+    if (fs.existsSync(gitignorePath)) {
+      content = fs.readFileSync(gitignorePath, "utf-8");
+    }
+
+    const sectionHeader = "\n# LIBRARIAN ISOLATED ARTIFACTS";
+    if (!content.includes(sectionHeader)) {
+      content += sectionHeader + "\n";
+    }
+
+    const added: string[] = [];
+    const existing = this.getIsolatedItems();
+
+    items.forEach((item) => {
+      if (!existing.includes(item)) {
+        content += `${item}\n`;
+        added.push(item);
+      }
+    });
+
+    fs.writeFileSync(gitignorePath, content, "utf-8");
+    
+    return added.length > 0 
+      ? `ISOLATION SUCCESSFUL:\n- Added to .gitignore: ${added.join(", ")}`
+      : "No new items to isolate (already in .gitignore or not found).";
+  }
+
+  private getIsolatedItems(): string[] {
+    const gitignorePath = path.join(this.knowledgePath, ".gitignore");
+    if (!fs.existsSync(gitignorePath)) return [];
+
+    const content = fs.readFileSync(gitignorePath, "utf-8");
+    const sectionHeader = "# LIBRARIAN ISOLATED ARTIFACTS";
+    const index = content.indexOf(sectionHeader);
+    if (index === -1) return [];
+
+    return content
+      .slice(index + sectionHeader.length)
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith("#"));
   }
 
   public updateProjectMap(): string {

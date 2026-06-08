@@ -64,9 +64,9 @@ async function setup() {
   console.log(JSON.stringify(config.mcpServers, null, 2));
   console.log("---------------------------------------------------\n");
 
-  const save = await question("Would you like to try saving this to ~/.gemini/settings.json? (y/n): ");
+  const settingsPath = path.join(projectRoot, '.gemini', 'settings.json');
+  const save = await question(`Would you like to save this to your local project settings (${settingsPath})? (y/n): `);
   if (save.toLowerCase() === 'y') {
-    const settingsPath = path.join(os.homedir(), '.gemini', 'settings.json');
     try {
       let currentSettings = {};
       if (fs.existsSync(settingsPath)) {

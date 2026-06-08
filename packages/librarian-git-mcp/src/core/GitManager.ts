@@ -3,11 +3,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { resolveConflictsMarkdown } from "@librarian/shared";
 
-interface GitError extends Error {
-  stdout?: Buffer | string;
-  stderr?: Buffer | string;
-}
-
 export class GitManager {
   private knowledgePath: string;
 
@@ -17,11 +12,63 @@ export class GitManager {
 
   private execCommand(command: string): string {
     try {
-      return execSync(command, { cwd: this.knowledgePath }).toString();
+      return execSync(command, { 
+        cwd: this.knowledgePath,
+        stdio: ["ignore", "pipe", "pipe"] 
+      }).toString();
     } catch (error: unknown) {
-      const gitError = error as GitError;
-      const errorOutput = String(gitError.stdout || gitError.stderr || gitError.message);
-      throw new Error(errorOutput, { cause: error });
+      const err = error as Record<string, unknown>;
+      const stderr = (err.stderr as Buffer | undefined)?.toString().trim() || "";
+      const stdout = (err.stdout as Buffer | undefined)?.toString().trim() || "";
+      const message = (err.message as string | undefined) || "Unknown error";
+      throw new Error(`Git command failed: ${command}\n${stderr || stdout || message}`, { cause: error });
+    }
+  }
+
+  private ensureInitialCommit(): void {
+    if (!fs.existsSync(path.join(this.knowledgePath, ".git"))) {
+      this.execCommand("git init");
+    }
+
+    try {
+      this.execCommand("git rev-parse --verify HEAD");
+    } catch {
+      // Empty repository - perform cold start
+      const libDir = path.join(this.knowledgePath, ".librarian");
+      if (!fs.existsSync(libDir)) {
+        fs.mkdirSync(libDir, { recursive: true });
+      }
+      
+      const instructionsPath = path.join(libDir, "INSTRUCTIONS.md");
+      if (!fs.existsSync(instructionsPath)) {
+        fs.writeFileSync(
+          instructionsPath, 
+          "# LIBRARIAN KNOWLEDGE BASE\n\nThis repository is managed by the Librarian Protocol. Do not modify the structure manually.\n", 
+          "utf-8"
+        );
+      }
+
+      this.execCommand("git add .");
+      
+      try {
+        this.execCommand("git config user.name 'Librarian Hub'");
+        this.execCommand("git config user.email 'librarian@example.com'");
+      } catch {
+        // Ignore config errors
+      }
+      this.execCommand('git commit -m "feat: initial knowledge base setup"');
+    }
+
+    // Ensure the initial branch is named 'master'
+    const current = this.showCurrentBranch();
+    if (current && current !== "master") {
+      const branches = this.execCommand("git branch")
+        .split("\n")
+        .map((b) => b.trim().replace("* ", ""));
+      
+      if (!branches.includes("master")) {
+        this.execCommand(`git branch -m ${current} master`);
+      }
     }
   }
 
@@ -36,26 +83,40 @@ export class GitManager {
 
   public getBranchList(pattern?: string): string {
     const cmd = pattern ? `git branch --list '${pattern}'` : "git branch";
-    return this.execCommand(cmd).trim() || "No branches found.";
+    try {
+      return this.execCommand(cmd).trim();
+    } catch {
+      return "No branches found (empty repository).";
+    }
   }
 
   public showCurrentBranch(): string {
-    return this.execCommand("git branch --show-current").trim();
+    try {
+      return this.execCommand("git branch --show-current").trim();
+    } catch {
+      return "";
+    }
   }
 
   public ensureDraft(): string {
-    const branches = this.execCommand("git branch")
-      .split("\n")
-      .map((b) => b.trim().replace("* ", ""));
+    this.ensureInitialCommit();
+    const branchesOutput = this.execCommand("git branch");
+    const branches = branchesOutput.split("\n");
+    for (let i = 0; i < branches.length; i++) {
+      branches[i] = branches[i].trim().replace("* ", "");
+    }
+    
     if (branches.includes("draft")) {
       this.execCommand("git checkout draft");
       return "Switched to existing 'draft' branch.";
     }
+    
     this.execCommand("git checkout -b draft master");
     return "Created and switched to new 'draft' branch from master.";
   }
 
   public consolidateBranches(): string {
+    this.ensureInitialCommit();
     const branches = this.execCommand("git branch")
       .split("\n")
       .map((b) => b.trim().replace("* ", ""))
@@ -66,14 +127,7 @@ export class GitManager {
     }
 
     // Ensure we are on draft branch
-    const currentBranches = this.execCommand("git branch")
-      .split("\n")
-      .map((b) => b.trim().replace("* ", ""));
-    if (!currentBranches.includes("draft")) {
-      this.execCommand("git checkout -b draft master");
-    } else {
-      this.execCommand("git checkout draft");
-    }
+    this.ensureDraft();
 
     let report = "CONSOLIDATION REPORT:\n";
     for (const branch of branches) {
@@ -100,8 +154,33 @@ export class GitManager {
     return report;
   }
 
+  private getIsolatedItems(): string[] {
+    const gitignorePath = path.join(this.knowledgePath, ".gitignore");
+    if (!fs.existsSync(gitignorePath)) return [];
+
+    const content = fs.readFileSync(gitignorePath, "utf-8");
+    const sectionHeader = "# LIBRARIAN ISOLATED ARTIFACTS";
+    const index = content.indexOf(sectionHeader);
+    if (index === -1) return [];
+
+    return content
+      .slice(index + sectionHeader.length)
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith("#"));
+  }
+
   public commit(message: string, files: string[] | string): string {
-    const filesToStage = Array.isArray(files) ? files.join(" ") : String(files);
+    const filesArray = Array.isArray(files) ? files : [files];
+    const isolatedItems = this.getIsolatedItems();
+    
+    // Explicitly block staging of isolated artifacts
+    const forbidden = filesArray.filter(f => isolatedItems.includes(f) || isolatedItems.some(i => f.startsWith(i + '/')));
+    if (forbidden.length > 0) {
+      throw new Error(`Cannot commit isolated artifacts: ${forbidden.join(", ")}. These are protected by the Isolation Protocol.`);
+    }
+
+    const filesToStage = filesArray.join(" ");
     this.execCommand(`git add ${filesToStage}`);
     this.execCommand(`git commit -m "${message}"`);
     return `Committed changes with message: ${message}`;

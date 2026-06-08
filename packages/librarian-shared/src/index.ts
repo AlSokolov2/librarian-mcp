@@ -10,6 +10,8 @@ export interface LibrarianConfig {
   hub_version: number;
   allowed_text_extensions: string[];
   migration_pending?: boolean;
+  hub_id?: string;
+  hub_aliases?: string[];
 }
 
 export interface GitAuditResult {

@@ -2,16 +2,19 @@ name: CI (Quality & Tests)
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ master, main, develop ]
   pull_request:
-    branches: [ master, main ]
+    branches: [ master, main, develop ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js
         uses: actions/setup-node@v4
@@ -19,11 +22,21 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Configure Git Identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install Dependencies
         run: npm install
 
+      - name: Secret Detection (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Security Audit
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=moderate
 
       - name: Linting
         run: npm run lint
@@ -31,5 +44,5 @@ jobs:
       - name: Run build (check compilation)
         run: npm run build
 
-      - name: Run unit tests
+      - name: Run unit tests with 100% Coverage Gate
         run: npm test

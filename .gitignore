@@ -28,3 +28,10 @@ meta/vectors/
 .DS_Store
 Thumbs.db
 .gemini
+coverage/
+
+# Temporary Files
+commit_message.txt
+*.temp
+*.tmp
+
