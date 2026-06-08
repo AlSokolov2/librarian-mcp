@@ -64,8 +64,8 @@ async function setup() {
   console.log(JSON.stringify(config.mcpServers, null, 2));
   console.log("---------------------------------------------------\n");
 
-  const settingsPath = path.join(hubPath, '.gemini', 'settings.json');
-  const save = await question(`Would you like to save this to your Knowledge Hub's local settings (${settingsPath})? (y/n): `);
+  const settingsPath = path.join(projectRoot, '.gemini', 'settings.json');
+  const save = await question(`Would you like to save this to your local project settings (${settingsPath})? (y/n): `);
   if (save.toLowerCase() === 'y') {
     try {
       let currentSettings = {};
