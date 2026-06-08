@@ -17,11 +17,58 @@ export class GitManager {
 
   private execCommand(command: string): string {
     try {
-      return execSync(command, { cwd: this.knowledgePath }).toString();
-    } catch (error: unknown) {
-      const gitError = error as GitError;
-      const errorOutput = String(gitError.stdout || gitError.stderr || gitError.message);
-      throw new Error(errorOutput, { cause: error });
+      return execSync(command, { 
+        cwd: this.knowledgePath,
+        stdio: ["ignore", "pipe", "pipe"] 
+      }).toString();
+    } catch (error: any) {
+      const stderr = error.stderr?.toString().trim() || "";
+      const stdout = error.stdout?.toString().trim() || "";
+      const message = error.message || "Unknown error";
+      throw new Error(`Git command failed: ${command}\n${stderr || stdout || message}`);
+    }
+  }
+
+  private ensureInitialCommit(): void {
+    if (!fs.existsSync(path.join(this.knowledgePath, ".git"))) {
+      this.execCommand("git init");
+    }
+
+    try {
+      // Check if there is at least one commit
+      this.execCommand("git rev-parse --verify HEAD");
+    } catch {
+      // Empty repository - perform cold start
+      const libDir = path.join(this.knowledgePath, ".librarian");
+      if (!fs.existsSync(libDir)) {
+        fs.mkdirSync(libDir, { recursive: true });
+      }
+      
+      const instructionsPath = path.join(libDir, "INSTRUCTIONS.md");
+      if (!fs.existsSync(instructionsPath)) {
+        fs.writeFileSync(
+          instructionsPath, 
+          "# LIBRARIAN KNOWLEDGE BASE\n\nThis repository is managed by the Librarian Protocol. Do not modify the structure manually.\n", 
+          "utf-8"
+        );
+      }
+
+      this.execCommand("git add .");
+      // Set identity for cold start if not configured
+      try {
+        this.execCommand("git config user.name 'Librarian Hub'");
+        this.execCommand("git config user.email 'librarian@example.com'");
+      } catch {
+        // Ignore config errors
+      }
+      
+      this.execCommand('git commit -m "feat: initial knowledge base setup"');
+      
+      // Ensure the initial branch is named 'master'
+      const current = this.showCurrentBranch();
+      if (current && current !== "master") {
+        this.execCommand(`git branch -m ${current} master`);
+      }
     }
   }
 
@@ -36,26 +83,38 @@ export class GitManager {
 
   public getBranchList(pattern?: string): string {
     const cmd = pattern ? `git branch --list '${pattern}'` : "git branch";
-    return this.execCommand(cmd).trim() || "No branches found.";
+    try {
+      return this.execCommand(cmd).trim() || "No branches found.";
+    } catch {
+      return "No branches found (empty repository).";
+    }
   }
 
   public showCurrentBranch(): string {
-    return this.execCommand("git branch --show-current").trim();
+    try {
+      return this.execCommand("git branch --show-current").trim();
+    } catch {
+      return "";
+    }
   }
 
   public ensureDraft(): string {
+    this.ensureInitialCommit();
     const branches = this.execCommand("git branch")
       .split("\n")
       .map((b) => b.trim().replace("* ", ""));
+    
     if (branches.includes("draft")) {
       this.execCommand("git checkout draft");
       return "Switched to existing 'draft' branch.";
     }
+    
     this.execCommand("git checkout -b draft master");
     return "Created and switched to new 'draft' branch from master.";
   }
 
   public consolidateBranches(): string {
+    this.ensureInitialCommit();
     const branches = this.execCommand("git branch")
       .split("\n")
       .map((b) => b.trim().replace("* ", ""))
@@ -66,14 +125,7 @@ export class GitManager {
     }
 
     // Ensure we are on draft branch
-    const currentBranches = this.execCommand("git branch")
-      .split("\n")
-      .map((b) => b.trim().replace("* ", ""));
-    if (!currentBranches.includes("draft")) {
-      this.execCommand("git checkout -b draft master");
-    } else {
-      this.execCommand("git checkout draft");
-    }
+    this.ensureDraft();
 
     let report = "CONSOLIDATION REPORT:\n";
     for (const branch of branches) {
