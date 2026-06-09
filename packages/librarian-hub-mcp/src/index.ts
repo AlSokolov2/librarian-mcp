@@ -231,6 +231,10 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = hubManager.repairIndices();
         return { content: [{ type: "text", text: result }] };
       }
+      case "repair_links": {
+        const result = hubManager.repairLinks();
+        return { content: [{ type: "text", text: result }] };
+      }
       default:
         throw new Error(`Unknown tool: ${name}`);
     }

@@ -230,6 +230,54 @@ export class HubManager {
     return `INDEX REPAIR COMPLETED:\n- Created ${repaired.length} index files.\nDetails:\n` + repaired.map(r => `- ${r}`).join("\n");
   }
 
+  public repairLinks(): string {
+    const wikiRoot = path.join(this.knowledgePath, "wiki");
+    let wikiFiles: string[];
+    try {
+      wikiFiles = execSync(`find "${wikiRoot}" -name "*.md"`)
+        .toString()
+        .split("\n")
+        .filter(Boolean);
+    } catch {
+      return "Failed to find wiki files.";
+    }
+
+    let modifiedCount = 0;
+    const modifiedFiles: string[] = [];
+
+    // Regex to match links like [[path/README]] or [[README]] or [[path/README|alias]]
+    // We only want to replace README if it's the target part of the link.
+    const linkRegex = /(\[\[.*?)(?:README|readme)(.*?\]\])/g;
+
+    for (const file of wikiFiles) {
+      const content = fs.readFileSync(file, "utf-8");
+      if (content.match(linkRegex)) {
+        // Careful replacement: we only replace README if it's at the end of the path or the whole path
+        // e.g. [[README]] -> [[index]], [[folder/README]] -> [[folder/index]]
+        // Note: The root README is still README.md, so [[README]] meaning root should NOT be changed.
+        // Wait, root is [[README]], folders are [[folder/index]].
+        // If a link is [[Projects/README]], it becomes [[Projects/index]].
+        // If a link is [[README]], it stays [[README]].
+        // Let's use a more precise regex.
+        
+        let newContent = content.replace(/\[\[(.*?\/)README(\|.*?)?\]\]/g, "[[$1index$2]]");
+        // Also handle if they were using README.md
+        newContent = newContent.replace(/\[\[(.*?\/)README\.md(\|.*?)?\]\]/g, "[[$1index$2]]");
+        
+        // Also handle root links if they were incorrectly mapped, but actually root is README.
+        // So [[README]] is correct for root. We leave it.
+        
+        if (newContent !== content) {
+          fs.writeFileSync(file, newContent, "utf-8");
+          modifiedCount++;
+          modifiedFiles.push(path.relative(this.knowledgePath, file));
+        }
+      }
+    }
+
+    return `LINK REPAIR COMPLETED:\n- Modified ${modifiedCount} files to use 'index' instead of 'README' in subdirectories.\nDetails:\n` + modifiedFiles.map(f => `- ${f}`).join("\n");
+  }
+
   public applyCleanup(items: string[]): string {
     const wikiFiles = execSync(`find "${path.join(this.knowledgePath, "wiki")}" -name "*.md"`)
       .toString()

@@ -18,9 +18,11 @@ export const DEFAULT_CONFIG: LibrarianConfig = {
 };
 
 function migrateV5toV6_Indices(knowledgePath: string) {
-  console.error("Starting V5 -> V6 Migration: Renaming legacy README.md to index.md in wiki/...");
+  console.error("Starting V5 -> V6 Migration: Renaming legacy README.md to index.md and repairing links in wiki/...");
   const wikiPath = path.join(knowledgePath, "wiki");
   if (!fs.existsSync(wikiPath)) return;
+
+  const markdownFiles: string[] = [];
 
   function walkAndRename(dir: string) {
     const items = fs.readdirSync(dir);
@@ -39,13 +41,30 @@ function migrateV5toV6_Indices(knowledgePath: string) {
         } else {
           console.error(`Migrating: ${fullPath} -> index.md`);
           fs.renameSync(fullPath, newPath);
+          markdownFiles.push(newPath); // It's a markdown file we should check for links
         }
+      } else if (item.endsWith(".md")) {
+        markdownFiles.push(fullPath);
       }
     }
   }
 
   walkAndRename(wikiPath);
-  console.error("V5 -> V6 Migration completed.");
+
+  // Auto-heal links
+  let modifiedCount = 0;
+  for (const file of markdownFiles) {
+    const content = fs.readFileSync(file, "utf-8");
+    if (content.match(/\[\[.*?README.*?\]\]/i)) {
+      let newContent = content.replace(/\[\[(.*?\/)README(\|.*?)?\]\]/g, "[[$1index$2]]");
+      newContent = newContent.replace(/\[\[(.*?\/)README\.md(\|.*?)?\]\]/g, "[[$1index$2]]");
+      if (newContent !== content) {
+        fs.writeFileSync(file, newContent, "utf-8");
+        modifiedCount++;
+      }
+    }
+  }
+  console.error(`V5 -> V6 Migration completed. Auto-healed ${modifiedCount} files with legacy links.`);
 }
 
 function generateGitignore(config: LibrarianConfig): string {
