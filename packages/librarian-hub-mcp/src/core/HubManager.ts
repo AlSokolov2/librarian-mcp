@@ -65,17 +65,25 @@ export class HubManager {
       const links = fileContent.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
       links.forEach((link) => {
         const target = link.replace(/[[\]]/g, "").split("|")[0].trim();
+        const targetName = path.basename(target);
+        
         const targetExists =
-          fileBaseNames.includes(target) ||
+          fileBaseNames.includes(targetName) ||
           fs.existsSync(path.join(this.knowledgePath, "raw", target)) ||
           fs.existsSync(path.join(this.knowledgePath, "raw", target + ".md")) ||
-          fs.existsSync(path.join(this.knowledgePath, target + ".md"));
+          fs.existsSync(path.join(this.knowledgePath, target + ".md")) ||
+          fs.existsSync(path.join(this.knowledgePath, "wiki", target + ".md"));
+        
         if (!targetExists) brokenLinks.push(`${relPath}: broken link to [[${target}]]`);
-        if (!linkMap[target]) linkMap[target] = [];
-        linkMap[target].push(relPath);
+        if (!linkMap[targetName]) linkMap[targetName] = [];
+        linkMap[targetName].push(relPath);
       });
     }
-    const orphans = fileBaseNames.filter((n) => !linkMap[n] && n !== "PROJECT_MAP");
+    
+    // Ignore index and README files from orphan checks
+    const orphans = fileBaseNames.filter(
+      (n) => !linkMap[n] && n !== "PROJECT_MAP" && n.toLowerCase() !== "index" && n.toLowerCase() !== "readme"
+    );
     const strayFiles = getStructuralViolations(this.knowledgePath);
 
     const isolatedItems = this.getIsolatedItems();
