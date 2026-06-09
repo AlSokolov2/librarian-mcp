@@ -421,4 +421,38 @@ export class HubManager {
       .map(line => line.trim())
       .filter(line => line && !line.startsWith("#"));
   }
+
+  public moveNode(sourceRelPath: string, targetRelPath: string): string {
+    const sourcePath = path.join(this.knowledgePath, sourceRelPath);
+    const targetPath = path.join(this.knowledgePath, targetRelPath);
+
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Source not found: ${sourceRelPath}`);
+    }
+
+    if (fs.existsSync(targetPath)) {
+      throw new Error(`Target already exists: ${targetRelPath}`);
+    }
+
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.renameSync(sourcePath, targetPath);
+
+    return `Node moved successfully from ${sourceRelPath} to ${targetRelPath}`;
+  }
+
+  public deleteNode(relPath: string): string {
+    const fullPath = path.join(this.knowledgePath, relPath);
+
+    if (!fs.existsSync(fullPath)) {
+      throw new Error(`Node not found: ${relPath}`);
+    }
+
+    if (fs.statSync(fullPath).isDirectory()) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(fullPath);
+    }
+
+    return `Node deleted successfully: ${relPath}`;
+  }
 }

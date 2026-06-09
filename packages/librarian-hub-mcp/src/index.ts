@@ -235,6 +235,16 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = hubManager.repairLinks();
         return { content: [{ type: "text", text: result }] };
       }
+      case "move_node": {
+        const { source_path, target_path } = args as { source_path: string; target_path: string };
+        const result = hubManager.moveNode(source_path, target_path);
+        return { content: [{ type: "text", text: result }] };
+      }
+      case "delete_node": {
+        const { path: relPath } = args as { path: string };
+        const result = hubManager.deleteNode(relPath);
+        return { content: [{ type: "text", text: result }] };
+      }
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
