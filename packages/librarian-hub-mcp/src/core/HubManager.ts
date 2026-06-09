@@ -7,10 +7,10 @@ import {
   getStructuralViolations,
   getDuplicateLinks,
   classifyStrayFile,
+  getMissingIndices,
+  generateFolderIndex,
   type LibrarianConfig
 } from "@librarian/shared";
-
-const PROJECT_MAP_REL_PATH = "wiki/PROJECT_MAP.md";
 
 export class HubManager {
   constructor(
@@ -41,7 +41,7 @@ export class HubManager {
   }
 
   public validateContent(relPath: string, content: string): string {
-    const val = validateAndEnforceRules(relPath, content, this.hubConfig);
+    const val = validateAndEnforceRules(relPath, content, this.hubConfig, this.knowledgePath);
     return JSON.stringify(val, null, 2);
   }
 
@@ -65,19 +65,26 @@ export class HubManager {
       const links = fileContent.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
       links.forEach((link) => {
         const target = link.replace(/[[\]]/g, "").split("|")[0].trim();
+        const targetName = path.basename(target);
+        
         const targetExists =
-          fileBaseNames.includes(target) ||
+          fileBaseNames.includes(targetName) ||
           fs.existsSync(path.join(this.knowledgePath, "raw", target)) ||
           fs.existsSync(path.join(this.knowledgePath, "raw", target + ".md")) ||
-          fs.existsSync(path.join(this.knowledgePath, target + ".md"));
+          fs.existsSync(path.join(this.knowledgePath, target + ".md")) ||
+          fs.existsSync(path.join(this.knowledgePath, "wiki", target + ".md"));
+        
         if (!targetExists) brokenLinks.push(`${relPath}: broken link to [[${target}]]`);
-        if (!linkMap[target]) linkMap[target] = [];
-        linkMap[target].push(relPath);
+        if (!linkMap[targetName]) linkMap[targetName] = [];
+        linkMap[targetName].push(relPath);
       });
     }
-    const orphans = fileBaseNames.filter((n) => !linkMap[n] && n !== "PROJECT_MAP");
+    
+    // Ignore index and README files from orphan checks
+    const orphans = fileBaseNames.filter(
+      (n) => !linkMap[n] && n !== "PROJECT_MAP" && n.toLowerCase() !== "index" && n.toLowerCase() !== "readme"
+    );
     const strayFiles = getStructuralViolations(this.knowledgePath);
-    const projectMapExists = fs.existsSync(path.join(this.knowledgePath, PROJECT_MAP_REL_PATH));
 
     const isolatedItems = this.getIsolatedItems();
     const activeStrayFiles = strayFiles.filter(f => !isolatedItems.includes(f));
@@ -90,6 +97,8 @@ export class HubManager {
         allDuplicates.push(`${path.relative(this.knowledgePath, file)}: ${dupes.join(", ")}`);
       }
     }
+
+    const missingIndices = getMissingIndices(this.knowledgePath);
 
     // SMART CURATION CLASSIFICATION
     const ghosts: string[] = [];
@@ -141,15 +150,19 @@ export class HubManager {
 
     const report = [
       "--- LIBRARIAN HUB HEALTH REPORT ---",
-      `Project Map Status: ${projectMapExists ? "OK" : "MISSING (CRITICAL)"}`,
       `Current Branch: ${currentBranch}`,
       `Illegal Branches Found: ${illegalBranches.length}`,
       `Git Index Status: ${gitDirty ? "DIRTY" : "CLEAN"}`,
       `Broken links: ${brokenLinks.length}`,
       `Orphans: ${orphans.length}`,
+      `Missing Folder Indices: ${missingIndices.length}`,
       `Stray Items in Root: ${activeStrayFiles.length}`,
       `Isolated Items: ${isolatedItems.length}`,
       "",
+      missingIndices.length > 0
+        ? "!!! MISSING FOLDER INDICES (REQUIRED) !!!\n" +
+          missingIndices.map((m) => `- ${m}`).join("\n")
+        : "",
       illegalBranches.length > 0
         ? "!!! ILLEGAL BRANCHES FOUND (MANDATORY CONSOLIDATION REQUIRED) !!!\n" +
           illegalBranches.map((b) => `- ${b}`).join("\n")
@@ -178,6 +191,8 @@ export class HubManager {
       orphans.length > 0 ? "\nOrphaned Nodes: " + orphans.join(", ") : "",
       illegalBranches.length > 0
         ? "\nRECOMMENDATION: Use 'git_consolidate_branches' to enforce Two-Branch Protocol."
+        : missingIndices.length > 0
+        ? "\nRECOMMENDATION: Use 'repair_indices' to automatically generate missing README.md files."
         : activeStrayFiles.length > 0
         ? "\nRECOMMENDATION: Use 'apply_cleanup' to resolve stray files (ghosts will be deleted, others moved, or use 'isolate' to ignore)."
         : gitDirty
@@ -190,6 +205,85 @@ export class HubManager {
       .join("\n");
 
     return report;
+  }
+
+  public repairIndices(): string {
+    const missing = getMissingIndices(this.knowledgePath);
+    if (missing.length === 0) return "No missing indices found.";
+
+    const repaired: string[] = [];
+
+    for (const relDir of missing) {
+      const fullDir = path.join(this.knowledgePath, relDir);
+      const items = fs.readdirSync(fullDir);
+      
+      const files = items
+        .filter(item => item.endsWith(".md") && item.toLowerCase() !== "readme.md" && item.toLowerCase() !== "index.md")
+        .map(name => {
+          // Попытка извлечь краткое описание (например, первую строку после H1)
+          const content = fs.readFileSync(path.join(fullDir, name), "utf-8");
+          const lines = content.split("\n").filter(l => l.trim() !== "" && !l.startsWith("---") && !l.startsWith("#"));
+          const summary = lines.length > 0 ? lines[0].trim() : undefined;
+          return { name, summary };
+        });
+
+      const subfolders = items.filter(item => fs.statSync(path.join(fullDir, item)).isDirectory() && !item.startsWith("."));
+
+      const readmeContent = generateFolderIndex(path.basename(relDir), files, subfolders);
+      const readmePath = path.join(relDir, "index.md");
+      this.writeFileRaw(readmePath, readmeContent);
+      repaired.push(readmePath);
+    }
+
+    return `INDEX REPAIR COMPLETED:\n- Created ${repaired.length} index files.\nDetails:\n` + repaired.map(r => `- ${r}`).join("\n");
+  }
+
+  public repairLinks(): string {
+    const wikiRoot = path.join(this.knowledgePath, "wiki");
+    let wikiFiles: string[];
+    try {
+      wikiFiles = execSync(`find "${wikiRoot}" -name "*.md"`)
+        .toString()
+        .split("\n")
+        .filter(Boolean);
+    } catch {
+      return "Failed to find wiki files.";
+    }
+
+    let modifiedCount = 0;
+    const modifiedFiles: string[] = [];
+
+    // Regex to match links like [[path/README]] or [[README]] or [[path/README|alias]]
+    // We only want to replace README if it's the target part of the link.
+    const linkRegex = /(\[\[.*?)(?:README|readme)(.*?\]\])/g;
+
+    for (const file of wikiFiles) {
+      const content = fs.readFileSync(file, "utf-8");
+      if (content.match(linkRegex)) {
+        // Careful replacement: we only replace README if it's at the end of the path or the whole path
+        // e.g. [[README]] -> [[index]], [[folder/README]] -> [[folder/index]]
+        // Note: The root README is still README.md, so [[README]] meaning root should NOT be changed.
+        // Wait, root is [[README]], folders are [[folder/index]].
+        // If a link is [[Projects/README]], it becomes [[Projects/index]].
+        // If a link is [[README]], it stays [[README]].
+        // Let's use a more precise regex.
+        
+        let newContent = content.replace(/\[\[(.*?\/)README(\|.*?)?\]\]/g, "[[$1index$2]]");
+        // Also handle if they were using README.md
+        newContent = newContent.replace(/\[\[(.*?\/)README\.md(\|.*?)?\]\]/g, "[[$1index$2]]");
+        
+        // Also handle root links if they were incorrectly mapped, but actually root is README.
+        // So [[README]] is correct for root. We leave it.
+        
+        if (newContent !== content) {
+          fs.writeFileSync(file, newContent, "utf-8");
+          modifiedCount++;
+          modifiedFiles.push(path.relative(this.knowledgePath, file));
+        }
+      }
+    }
+
+    return `LINK REPAIR COMPLETED:\n- Modified ${modifiedCount} files to use 'index' instead of 'README' in subdirectories.\nDetails:\n` + modifiedFiles.map(f => `- ${f}`).join("\n");
   }
 
   public applyCleanup(items: string[]): string {
@@ -328,32 +422,37 @@ export class HubManager {
       .filter(line => line && !line.startsWith("#"));
   }
 
-  public updateProjectMap(): string {
-    const projectsDir = path.join(this.knowledgePath, "wiki", "Projects");
-    const globalDir = path.join(this.knowledgePath, "wiki", "_Global");
-    const projects = fs.existsSync(projectsDir)
-      ? fs
-          .readdirSync(projectsDir)
-          .filter((f) => fs.statSync(path.join(projectsDir, f)).isDirectory())
-      : [];
-    const globalNodes = fs.existsSync(globalDir)
-      ? fs.readdirSync(globalDir).filter((f) => !f.startsWith("."))
-      : [];
+  public moveNode(sourceRelPath: string, targetRelPath: string): string {
+    const sourcePath = path.join(this.knowledgePath, sourceRelPath);
+    const targetPath = path.join(this.knowledgePath, targetRelPath);
 
-    // Deduplicate and sort
-    const projectLinks = Array.from(new Set(projects))
-      .sort()
-      .map((p) => `- [[${p}]]`);
-    const globalLinks = Array.from(new Set(globalNodes.map((g) => g.replace(".md", ""))))
-      .sort()
-      .map((g) => `- [[${g}]]`);
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Source not found: ${sourceRelPath}`);
+    }
 
-    const mapContent =
-      "# MAP OF PROJECTS & KNOWLEDGE NODES\n\n## 📂 Projects\n" +
-      projectLinks.join("\n") +
-      "\n\n## 🌐 Global Nodes\n" +
-      globalLinks.join("\n");
-    fs.writeFileSync(path.join(this.knowledgePath, PROJECT_MAP_REL_PATH), mapContent, "utf-8");
-    return "Map updated.";
+    if (fs.existsSync(targetPath)) {
+      throw new Error(`Target already exists: ${targetRelPath}`);
+    }
+
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.renameSync(sourcePath, targetPath);
+
+    return `Node moved successfully from ${sourceRelPath} to ${targetRelPath}`;
+  }
+
+  public deleteNode(relPath: string): string {
+    const fullPath = path.join(this.knowledgePath, relPath);
+
+    if (!fs.existsSync(fullPath)) {
+      throw new Error(`Node not found: ${relPath}`);
+    }
+
+    if (fs.statSync(fullPath).isDirectory()) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(fullPath);
+    }
+
+    return `Node deleted successfully: ${relPath}`;
   }
 }

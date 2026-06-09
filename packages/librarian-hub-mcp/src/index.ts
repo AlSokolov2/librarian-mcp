@@ -25,10 +25,9 @@ if (!KNOWLEDGE_PATH) {
 }
 
 const CONFIG_PATH = path.join(KNOWLEDGE_PATH, ".librarian", "config.json");
-const PROJECT_MAP_REL_PATH = "wiki/PROJECT_MAP.md";
 
 // --- INITIALIZATION ---
-initializeHub(KNOWLEDGE_PATH, CONFIG_PATH, PROJECT_MAP_REL_PATH);
+initializeHub(KNOWLEDGE_PATH, CONFIG_PATH);
 
 const hubConfig: LibrarianConfig = fs.existsSync(CONFIG_PATH)
   ? { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) }
@@ -56,12 +55,6 @@ mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
         name: "Librarian Configuration",
         description: "Active validation rules for the knowledge base.",
         mimeType: "application/json",
-      },
-      {
-        uri: "librarian://wiki/PROJECT_MAP.md",
-        name: "Project Map",
-        description: "Global index of all projects and knowledge nodes.",
-        mimeType: "text/markdown",
       },
     ],
   };
@@ -171,9 +164,37 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "update_project_map",
-        description: "Synchronize the global project map with current filesystem state.",
+        name: "repair_indices",
+        description: "Automatically generate missing README.md index files for folders in wiki/.",
         inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "repair_links",
+        description: "Automatically repair broken navigation links caused by the v6 migration (README -> index).",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "move_node",
+        description: "Move or rename a node within the wiki directory. Updates the file system.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_path: { type: "string", description: "Relative path of the source file/directory (e.g. 'wiki/Old_Name.md')" },
+            target_path: { type: "string", description: "Relative path of the target file/directory (e.g. 'wiki/New_Name.md')" }
+          },
+          required: ["source_path", "target_path"]
+        }
+      },
+      {
+        name: "delete_node",
+        description: "Delete a node (file or directory) within the wiki directory.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative path of the file/directory to delete (e.g. 'wiki/Trash.md')" }
+          },
+          required: ["path"]
+        }
       },
     ],
   };
@@ -234,8 +255,22 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = hubManager.isolateArtifacts(items);
         return { content: [{ type: "text", text: result }] };
       }
-      case "update_project_map": {
-        const result = hubManager.updateProjectMap();
+      case "repair_indices": {
+        const result = hubManager.repairIndices();
+        return { content: [{ type: "text", text: result }] };
+      }
+      case "repair_links": {
+        const result = hubManager.repairLinks();
+        return { content: [{ type: "text", text: result }] };
+      }
+      case "move_node": {
+        const { source_path, target_path } = args as { source_path: string; target_path: string };
+        const result = hubManager.moveNode(source_path, target_path);
+        return { content: [{ type: "text", text: result }] };
+      }
+      case "delete_node": {
+        const { path: relPath } = args as { path: string };
+        const result = hubManager.deleteNode(relPath);
         return { content: [{ type: "text", text: result }] };
       }
       default:

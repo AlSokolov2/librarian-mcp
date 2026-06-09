@@ -9,6 +9,7 @@ export interface LibrarianConfig {
   main_branch: string;
   hub_version: number;
   allowed_text_extensions: string[];
+  language: string;
   migration_pending?: boolean;
   hub_id?: string;
   hub_aliases?: string[];
@@ -62,7 +63,8 @@ export function getDuplicateLinks(content: string): string[] {
 export function validateAndEnforceRules(
   relPath: string, 
   content: string, 
-  config: LibrarianConfig
+  config: LibrarianConfig,
+  knowledgePath: string
 ): { valid: boolean; content: string; error?: string } {
   const isWiki = relPath.startsWith("wiki/");
   const fileName = path.basename(relPath);
@@ -81,9 +83,27 @@ export function validateAndEnforceRules(
 
   if (isWiki) {
     const parsed = matter(content);
+
+    // --- DECENTRALIZED SCHEMA ---
+    const dirName = path.dirname(relPath);
+    const indexPath = path.join(knowledgePath, dirName, "index.md");
+    let localRequiredYaml: string[] = [];
+    let localRequiredHeaders: string[] = [];
     
+    if (fs.existsSync(indexPath) && fileName !== "index.md") {
+      const indexContent = fs.readFileSync(indexPath, "utf-8");
+      const indexMatter = matter(indexContent);
+      if (indexMatter.data?.enforce_schema) {
+        const schema = indexMatter.data.enforce_schema;
+        if (Array.isArray(schema.required_yaml)) localRequiredYaml = schema.required_yaml;
+        if (Array.isArray(schema.required_headers)) localRequiredHeaders = schema.required_headers;
+      }
+    }
+
+    const allRequiredYaml = Array.from(new Set([...(config.required_yaml_fields || []), ...localRequiredYaml]));
+
     // Check required fields
-    for (const field of config.required_yaml_fields) {
+    for (const field of allRequiredYaml) {
       if (!parsed.data || !parsed.data[field]) {
         return { 
           valid: false, 
@@ -96,13 +116,20 @@ export function validateAndEnforceRules(
     if (config.auto_update_date) {
       parsed.data.last_updated = new Date().toISOString().split('T')[0];
     }
-    
-    if (!parsed.content.trim().startsWith("# ")) {
+
+    if (fileName !== "index.md" && !parsed.content.trim().startsWith("# ")) {
       return { 
         valid: false, 
         content, 
-        error: "Missing H1 header (# Title)" 
+        error: "Missing H1 header" 
       };
+    }
+
+    // Graceful degradation for headers
+    for (const header of localRequiredHeaders) {
+      if (!parsed.content.includes(header)) {
+        parsed.content += `\n\n${header}\n> [!todo] REQUIRE_HUMAN_INPUT: Данные для раздела отсутствуют в сыром источнике.\n`;
+      }
     }
 
     return { valid: true, content: matter.stringify(parsed.content, parsed.data) };
@@ -203,4 +230,88 @@ export function classifyStrayFile(
 
   return "TRASH";
 }
+
+/**
+ * Находит папки в wiki/, в которых отсутствует index.md
+ */
+export function getMissingIndices(knowledgePath: string): string[] {
+  const wikiPath = path.join(knowledgePath, "wiki");
+  if (!fs.existsSync(wikiPath)) return [];
+
+  const missing: string[] = [];
+  
+  function walk(dir: string) {
+    const items = fs.readdirSync(dir);
+    const hasIndex = items.some(item => item.toLowerCase() === "index.md");
+    const relDir = path.relative(knowledgePath, dir);
+
+    // Проверяем только подпапки wiki/ (корневой README.md игнорируем здесь)
+    // Сам каталог wiki/ тоже должен иметь index.md
+    if (!hasIndex && relDir.startsWith("wiki")) {
+      missing.push(relDir);
+    }
+
+    for (const item of items) {
+      const fullPath = path.join(dir, item);
+      if (fs.statSync(fullPath).isDirectory() && !item.startsWith(".")) {
+        walk(fullPath);
+      }
+    }
+  }
+
+  walk(wikiPath);
+  return missing;
+}
+
+/**
+ * Генерирует контент index.md для папки на основе её содержимого
+ */
+export function generateFolderIndex(
+  folderName: string, 
+  files: { name: string; summary?: string }[], 
+  subfolders: string[]
+): string {
+  const title = folderName === "wiki" ? "Knowledge Sanctuary" : folderName.replace(/_/g, " ");
+  
+  let moc = files
+    .filter(f => f.name.toLowerCase() !== "index.md" && f.name.toLowerCase() !== "readme.md")
+    .map(f => `* [[${f.name.replace(".md", "")}]] — ${f.summary || "Описание в процессе..."}`)
+    .join("\n");
+    
+  if (subfolders.length > 0) {
+    moc += "\n\n### 📂 Подразделы\n" + subfolders.map(s => `* [[${s}/index|${s.replace(/_/g, " ")}]]`).join("\n");
+  }
+
+  // Базовая Mermaid диаграмма
+  let mermaid = "```mermaid\ngraph TD\n";
+  mermaid += `    Index[${title}] --> Files[Документы]\n`;
+  if (subfolders.length > 0) {
+    mermaid += `    Index --> Subs[Подпапки]\n`;
+  }
+  mermaid += "```";
+
+  const footer = folderName === "wiki" 
+    ? "[[README|назад к Порталу]]" 
+    : "[[wiki/index|назад на Главную]]";
+
+  return `# ${title}
+
+> [!abstract]
+> Концептуальный узел, объединяющий знания по теме "${title}".
+
+---
+
+## 🗺️ Карта Контента (MOC)
+${moc || "В этой папке пока нет документов."}
+
+---
+
+## 📊 Визуализация
+${mermaid}
+
+---
+${footer}
+`;
+}
+
 

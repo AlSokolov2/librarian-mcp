@@ -1,6 +1,23 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [6.0.0] (2026-06-09)
+
+### 🚀 Features
+
+* **hub:** implement Ubiquitous Indexing (index.md) and recursive navigation ([d5a14f8])
+* **hub:** implement automated link healing tool `repair_links` ([745a650])
+* **hub:** add Law-0 compliant `move_node` and `delete_node` tools ([4eb7fe1])
+* **shared:** implement Decentralized Strict Schema Validation with auto-injection ([1944064])
+* **core:** transition to Quantum Semantic Ontology (flat clusters) ([99bb5b0])
+
+### 🐛 Bug Fixes
+
+* **hub:** resolve false-positive broken links for index files in `check_health` ([8204ec9])
+* **shared:** fix H1 validation for dynamically generated index files ([bed3311])
+
+
 ## [5.1.0](https://github.com/AlSokolov2/librarian-mcp/compare/v5.0.0...v5.1.0) (2026-06-08)
 
 
