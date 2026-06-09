@@ -290,6 +290,10 @@ export function generateFolderIndex(
   }
   mermaid += "```";
 
+  const footer = folderName === "wiki" 
+    ? "[[README|назад к Порталу]]" 
+    : "[[wiki/index|назад на Главную]]";
+
   return `# ${title}
 
 > [!abstract]
@@ -306,7 +310,7 @@ ${moc || "В этой папке пока нет документов."}
 ${mermaid}
 
 ---
-[[README|назад на Главную]]
+${footer}
 `;
 }
 
