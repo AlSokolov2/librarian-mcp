@@ -168,6 +168,34 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Automatically generate missing README.md index files for folders in wiki/.",
         inputSchema: { type: "object", properties: {} },
       },
+      {
+        name: "repair_links",
+        description: "Automatically repair broken navigation links caused by the v6 migration (README -> index).",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "move_node",
+        description: "Move or rename a node within the wiki directory. Updates the file system.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_path: { type: "string", description: "Relative path of the source file/directory (e.g. 'wiki/Old_Name.md')" },
+            target_path: { type: "string", description: "Relative path of the target file/directory (e.g. 'wiki/New_Name.md')" }
+          },
+          required: ["source_path", "target_path"]
+        }
+      },
+      {
+        name: "delete_node",
+        description: "Delete a node (file or directory) within the wiki directory.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative path of the file/directory to delete (e.g. 'wiki/Trash.md')" }
+          },
+          required: ["path"]
+        }
+      },
     ],
   };
 });
