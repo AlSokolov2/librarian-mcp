@@ -78,41 +78,65 @@ describe("Librarian Core Logic", () => {
 
   describe("validateAndEnforceRules", () => {
     it("should reject invalid file naming in wiki", () => {
-      const result = validateAndEnforceRules("wiki/bad_name.md", "# Title", mockConfig);
+      const result = validateAndEnforceRules("wiki/bad_name.md", "# Title", mockConfig, "");
       expect(result.valid).toBe(false);
       expect(result.error).toContain("Naming violation");
     });
 
     it("should allow index.md regardless of naming convention if it has required fields", () => {
       const content = "---\nsources: [internal]\n---\n# Index";
-      const result = validateAndEnforceRules("wiki/index.md", content, mockConfig);
+      const result = validateAndEnforceRules("wiki/index.md", content, mockConfig, "");
       expect(result.valid).toBe(true);
     });
 
     it("should skip validation for non-wiki files", () => {
-      const result = validateAndEnforceRules("raw/some_file.md", "no header", mockConfig);
+      const result = validateAndEnforceRules("raw/some_file.md", "no header", mockConfig, "");
       expect(result.valid).toBe(true);
     });
 
     it("should reject missing required YAML fields", () => {
       const content = "---\ntags: [test]\n---\n# Title";
-      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, mockConfig);
+      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, mockConfig, "");
       expect(result.valid).toBe(false);
       expect(result.error).toContain("Missing required YAML field: sources");
     });
 
     it("should reject missing H1 header", () => {
       const content = "---\nsources: [test]\n---\nNo H1 here";
-      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, mockConfig);
+      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, mockConfig, "");
       expect(result.valid).toBe(false);
       expect(result.error).toContain("Missing H1 header");
     });
 
     it("should not update last_updated date if not configured", () => {
       const content = "---\nsources: [test]\nlast_updated: '2020-01-01'\n---\n# Title";
-      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, { ...mockConfig, auto_update_date: false } as any);
+      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, { ...mockConfig, auto_update_date: false } as any, "");
       expect(result.valid).toBe(true);
       expect(result.content).toContain("last_updated: '2020-01-01'");
+    });
+
+    it("should enforce decentralized schema from local index.md", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "librarian-schema-"));
+      const wikiDir = path.join(tempDir, "wiki", "Concepts");
+      fs.mkdirSync(wikiDir, { recursive: true });
+      
+      // Create local index.md with strict schema
+      fs.writeFileSync(path.join(wikiDir, "index.md"), "---\nenforce_schema:\n  required_yaml: [domain]\n  required_headers: [\"## Details\"]\n---");
+      
+      // Test missing YAML
+      const badYaml = "---\nsources: [test]\n---\n# Title\n## Details";
+      const result1 = validateAndEnforceRules("wiki/Concepts/Node.md", badYaml, mockConfig, tempDir);
+      expect(result1.valid).toBe(false);
+      expect(result1.error).toContain("Missing required YAML field: domain");
+      
+      // Test missing Header (should auto-inject)
+      const badHeader = "---\nsources: [test]\ndomain: dev\n---\n# Title";
+      const result2 = validateAndEnforceRules("wiki/Concepts/Node.md", badHeader, mockConfig, tempDir);
+      expect(result2.valid).toBe(true);
+      expect(result2.content).toContain("## Details");
+      expect(result2.content).toContain("REQUIRE_HUMAN_INPUT");
+
+      fs.rmSync(tempDir, { recursive: true });
     });
   });
 

@@ -63,7 +63,8 @@ export function getDuplicateLinks(content: string): string[] {
 export function validateAndEnforceRules(
   relPath: string, 
   content: string, 
-  config: LibrarianConfig
+  config: LibrarianConfig,
+  knowledgePath: string
 ): { valid: boolean; content: string; error?: string } {
   const isWiki = relPath.startsWith("wiki/");
   const fileName = path.basename(relPath);
@@ -82,9 +83,27 @@ export function validateAndEnforceRules(
 
   if (isWiki) {
     const parsed = matter(content);
+
+    // --- DECENTRALIZED SCHEMA ---
+    const dirName = path.dirname(relPath);
+    const indexPath = path.join(knowledgePath, dirName, "index.md");
+    let localRequiredYaml: string[] = [];
+    let localRequiredHeaders: string[] = [];
+    
+    if (fs.existsSync(indexPath) && fileName !== "index.md") {
+      const indexContent = fs.readFileSync(indexPath, "utf-8");
+      const indexMatter = matter(indexContent);
+      if (indexMatter.data?.enforce_schema) {
+        const schema = indexMatter.data.enforce_schema;
+        if (Array.isArray(schema.required_yaml)) localRequiredYaml = schema.required_yaml;
+        if (Array.isArray(schema.required_headers)) localRequiredHeaders = schema.required_headers;
+      }
+    }
+
+    const allRequiredYaml = Array.from(new Set([...config.required_yaml_fields, ...localRequiredYaml]));
     
     // Check required fields
-    for (const field of config.required_yaml_fields) {
+    for (const field of allRequiredYaml) {
       if (!parsed.data || !parsed.data[field]) {
         return { 
           valid: false, 
@@ -104,6 +123,13 @@ export function validateAndEnforceRules(
         content, 
         error: "Missing H1 header (# Title)" 
       };
+    }
+
+    // Graceful degradation for headers
+    for (const header of localRequiredHeaders) {
+      if (!parsed.content.includes(header)) {
+        parsed.content += `\n\n${header}\n> [!todo] REQUIRE_HUMAN_INPUT: Данные для раздела отсутствуют в сыром источнике.\n`;
+      }
     }
 
     return { valid: true, content: matter.stringify(parsed.content, parsed.data) };

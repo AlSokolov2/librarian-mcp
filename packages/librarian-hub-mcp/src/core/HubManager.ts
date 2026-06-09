@@ -41,7 +41,7 @@ export class HubManager {
   }
 
   public validateContent(relPath: string, content: string): string {
-    const val = validateAndEnforceRules(relPath, content, this.hubConfig);
+    const val = validateAndEnforceRules(relPath, content, this.hubConfig, this.knowledgePath);
     return JSON.stringify(val, null, 2);
   }
 
