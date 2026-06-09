@@ -100,8 +100,8 @@ export function validateAndEnforceRules(
       }
     }
 
-    const allRequiredYaml = Array.from(new Set([...config.required_yaml_fields, ...localRequiredYaml]));
-    
+    const allRequiredYaml = Array.from(new Set([...(config.required_yaml_fields || []), ...localRequiredYaml]));
+
     // Check required fields
     for (const field of allRequiredYaml) {
       if (!parsed.data || !parsed.data[field]) {
@@ -116,12 +116,12 @@ export function validateAndEnforceRules(
     if (config.auto_update_date) {
       parsed.data.last_updated = new Date().toISOString().split('T')[0];
     }
-    
-    if (!parsed.content.trim().startsWith("# ")) {
+
+    if (fileName !== "index.md" && !parsed.content.trim().startsWith("# ")) {
       return { 
         valid: false, 
         content, 
-        error: "Missing H1 header (# Title)" 
+        error: "Missing H1 header" 
       };
     }
 

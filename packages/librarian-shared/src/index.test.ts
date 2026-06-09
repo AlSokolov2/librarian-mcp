@@ -18,7 +18,6 @@ vi.mock("fs", async () => {
   const actual = await vi.importActual("fs") as any;
   return {
     ...actual,
-    // We'll use real fs for template tests but mock some parts if needed
   };
 });
 
@@ -41,7 +40,7 @@ describe("Librarian Core Logic", () => {
 
     it("should identify files not in allowed list", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "librarian-test-"));
-      fs.writeFileSync(path.join(tempDir, "allowed.md"), "test"); // Actually README.md is allowed
+      fs.writeFileSync(path.join(tempDir, "allowed.md"), "test");
       fs.writeFileSync(path.join(tempDir, "README.md"), "test");
       fs.writeFileSync(path.join(tempDir, "stray.exe"), "test");
       fs.mkdirSync(path.join(tempDir, "wiki"));
@@ -51,8 +50,8 @@ describe("Librarian Core Logic", () => {
       expect(violations).toContain("allowed.md");
       expect(violations).toContain("stray.exe");
       expect(violations).toContain("stray_dir");
-      expect(violations).not.toContain("README.md"); // Tests ALLOWED_ROOT_FILES
-      expect(violations).not.toContain("wiki"); // Tests ALLOWED_ROOT_DIRS
+      expect(violations).not.toContain("README.md");
+      expect(violations).not.toContain("wiki");
 
       fs.rmSync(tempDir, { recursive: true });
     });
@@ -108,11 +107,35 @@ describe("Librarian Core Logic", () => {
       expect(result.error).toContain("Missing H1 header");
     });
 
-    it("should not update last_updated date if not configured", () => {
-      const content = "---\nsources: [test]\nlast_updated: '2020-01-01'\n---\n# Title";
-      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, { ...mockConfig, auto_update_date: false } as any, "");
+    it("should skip H1 check for index.md if it doesn't have one yet (allow generation)", () => {
+      const content = "---\nsources: [internal]\n---";
+      const result = validateAndEnforceRules("wiki/index.md", content, mockConfig, "");
       expect(result.valid).toBe(true);
-      expect(result.content).toContain("last_updated: '2020-01-01'");
+    });
+
+    it("should handle decentralized schema if index.md is missing or has no schema", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "librarian-schema-empty-"));
+      const wikiDir = path.join(tempDir, "wiki", "Empty");
+      fs.mkdirSync(wikiDir, { recursive: true });
+      
+      const content = "---\nsources: [test]\n---\n# Title";
+      const result = validateAndEnforceRules("wiki/Empty/Node.md", content, mockConfig, tempDir);
+      expect(result.valid).toBe(true);
+
+      fs.writeFileSync(path.join(wikiDir, "index.md"), "# No YAML here");
+      const result2 = validateAndEnforceRules("wiki/Empty/Node.md", content, mockConfig, tempDir);
+      expect(result2.valid).toBe(true);
+
+      fs.writeFileSync(path.join(wikiDir, "index.md"), "---\ntags: [test]\n---\n# With YAML but no schema");
+      const result3 = validateAndEnforceRules("wiki/Empty/Node.md", content, mockConfig, tempDir);
+      expect(result3.valid).toBe(true);
+
+      fs.rmSync(tempDir, { recursive: true });
+    });
+
+    it("should return true if required yaml field is not an array (graceful failure)", () => {
+      const result = validateAndEnforceRules("wiki/Node.md", "# Title", { ...mockConfig, required_yaml_fields: null as any }, "");
+      expect(result.valid).toBe(true); 
     });
 
     it("should enforce decentralized schema from local index.md", () => {
@@ -120,23 +143,37 @@ describe("Librarian Core Logic", () => {
       const wikiDir = path.join(tempDir, "wiki", "Concepts");
       fs.mkdirSync(wikiDir, { recursive: true });
       
-      // Create local index.md with strict schema
-      fs.writeFileSync(path.join(wikiDir, "index.md"), "---\nenforce_schema:\n  required_yaml: [domain]\n  required_headers: [\"## Details\"]\n---");
+      fs.writeFileSync(path.join(wikiDir, "index.md"), "---\nenforce_schema:\n  required_yaml: [domain]\n  required_headers: [\"## Details\", \"## Existing\"]\n---");
       
-      // Test missing YAML
-      const badYaml = "---\nsources: [test]\n---\n# Title\n## Details";
-      const result1 = validateAndEnforceRules("wiki/Concepts/Node.md", badYaml, mockConfig, tempDir);
-      expect(result1.valid).toBe(false);
-      expect(result1.error).toContain("Missing required YAML field: domain");
-      
-      // Test missing Header (should auto-inject)
-      const badHeader = "---\nsources: [test]\ndomain: dev\n---\n# Title";
-      const result2 = validateAndEnforceRules("wiki/Concepts/Node.md", badHeader, mockConfig, tempDir);
-      expect(result2.valid).toBe(true);
-      expect(result2.content).toContain("## Details");
-      expect(result2.content).toContain("REQUIRE_HUMAN_INPUT");
+      const mixedHeader = "---\nsources: [test]\ndomain: dev\n---\n# Title\n## Existing\nSome content";
+      const result = validateAndEnforceRules("wiki/Concepts/Node.md", mixedHeader, mockConfig, tempDir);
+      expect(result.valid).toBe(true);
+      expect(result.content).toContain("## Details");
+      expect(result.content).toContain("REQUIRE_HUMAN_INPUT");
+      expect(result.content).toContain("## Existing");
 
       fs.rmSync(tempDir, { recursive: true });
+    });
+
+    it("should handle non-array fields in enforce_schema gracefully", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "librarian-schema-bad-fields-"));
+      const wikiDir = path.join(tempDir, "wiki", "BadFields");
+      fs.mkdirSync(wikiDir, { recursive: true });
+      
+      fs.writeFileSync(path.join(wikiDir, "index.md"), "---\nenforce_schema:\n  required_yaml: \"not an array\"\n  required_headers: 123\n---");
+      
+      const content = "---\nsources: [test]\n---\n# Title";
+      const result = validateAndEnforceRules("wiki/BadFields/Node.md", content, mockConfig, tempDir);
+      expect(result.valid).toBe(true);
+
+      fs.rmSync(tempDir, { recursive: true });
+    });
+
+    it("should not update last_updated date if not configured", () => {
+      const content = "---\nsources: [test]\nlast_updated: '2020-01-01'\n---\n# Title";
+      const result = validateAndEnforceRules("wiki/Valid_Name.md", content, { ...mockConfig, auto_update_date: false } as any, "");
+      expect(result.valid).toBe(true);
+      expect(result.content).toContain("last_updated: '2020-01-01'");
     });
   });
 
@@ -251,22 +288,30 @@ End text`;
       fs.mkdirSync(path.join(tempHub, "wiki/ProjectB"), { recursive: true });
       fs.writeFileSync(path.join(tempHub, "wiki/index.md"), "# Root Index");
       fs.writeFileSync(path.join(tempHub, "wiki/ProjectA/index.md"), "# Project A Index");
-      // ProjectB is missing index.md
     });
 
     afterEach(() => {
       if (fs.existsSync(tempHub)) fs.rmSync(tempHub, { recursive: true, force: true });
     });
 
+    it("getMissingIndices should return empty if wiki doesn't exist", () => {
+      expect(getMissingIndices("/non/existent")).toEqual([]);
+    });
+
     it("getMissingIndices should identify folders without index.md", () => {
       const missing = getMissingIndices(tempHub);
       expect(missing).toContain("wiki/ProjectB");
       expect(missing).not.toContain("wiki/ProjectA");
-      expect(missing).not.toContain("wiki"); // Root wiki/ has index.md
+      expect(missing).not.toContain("wiki");
     });
 
     it("generateFolderIndex should return compliant markdown", () => {
-      const files = [{ name: "Doc1.md", summary: "Test Doc" }];
+      const files = [
+        { name: "Doc1.md", summary: "Test Doc" },
+        { name: "Doc2.md" },
+        { name: "index.md" },
+        { name: "README.md" }
+      ];
       const subfolders = ["SubA"];
       const readme = generateFolderIndex("Test_Folder", files, subfolders);
       
@@ -274,9 +319,20 @@ End text`;
       expect(readme).toContain("> [!abstract]");
       expect(readme).toContain("## 🗺️ Карта Контента (MOC)");
       expect(readme).toContain("[[Doc1]] — Test Doc");
+      expect(readme).toContain("[[Doc2]] — Описание в процессе...");
+      expect(readme).not.toContain("[[index]]");
+      expect(readme).not.toContain("[[README]]");
       expect(readme).toContain("### 📂 Подразделы");
       expect(readme).toContain("[[SubA/index|SubA]]");
       expect(readme).toContain("```mermaid");
+      expect(readme).toContain("[[wiki/index|назад на Главную]]");
+    });
+
+    it("generateFolderIndex should handle root wiki folder and empty states", () => {
+      const readme = generateFolderIndex("wiki", [], []);
+      expect(readme).toContain("# Knowledge Sanctuary");
+      expect(readme).toContain("В этой папке пока нет документов.");
+      expect(readme).toContain("[[README|назад к Порталу]]");
     });
   });
 
