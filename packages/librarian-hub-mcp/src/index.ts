@@ -25,10 +25,9 @@ if (!KNOWLEDGE_PATH) {
 }
 
 const CONFIG_PATH = path.join(KNOWLEDGE_PATH, ".librarian", "config.json");
-const PROJECT_MAP_REL_PATH = "wiki/PROJECT_MAP.md";
 
 // --- INITIALIZATION ---
-initializeHub(KNOWLEDGE_PATH, CONFIG_PATH, PROJECT_MAP_REL_PATH);
+initializeHub(KNOWLEDGE_PATH, CONFIG_PATH);
 
 const hubConfig: LibrarianConfig = fs.existsSync(CONFIG_PATH)
   ? { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) }
@@ -56,12 +55,6 @@ mcpServer.setRequestHandler(ListResourcesRequestSchema, async () => {
         name: "Librarian Configuration",
         description: "Active validation rules for the knowledge base.",
         mimeType: "application/json",
-      },
-      {
-        uri: "librarian://wiki/PROJECT_MAP.md",
-        name: "Project Map",
-        description: "Global index of all projects and knowledge nodes.",
-        mimeType: "text/markdown",
       },
     ],
   };
@@ -171,8 +164,8 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "update_project_map",
-        description: "Synchronize the global project map with current filesystem state.",
+        name: "repair_indices",
+        description: "Automatically generate missing README.md index files for folders in wiki/.",
         inputSchema: { type: "object", properties: {} },
       },
     ],
@@ -234,8 +227,8 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = hubManager.isolateArtifacts(items);
         return { content: [{ type: "text", text: result }] };
       }
-      case "update_project_map": {
-        const result = hubManager.updateProjectMap();
+      case "repair_indices": {
+        const result = hubManager.repairIndices();
         return { content: [{ type: "text", text: result }] };
       }
       default:

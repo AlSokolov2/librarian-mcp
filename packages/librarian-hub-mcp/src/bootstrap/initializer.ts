@@ -4,7 +4,7 @@ import * as crypto from "crypto";
 import { execSync } from "child_process";
 import { type LibrarianConfig } from "@librarian/shared";
 
-export const LATEST_HUB_VERSION = 5;
+export const LATEST_HUB_VERSION = 6;
 
 export const DEFAULT_CONFIG: LibrarianConfig = {
   naming_convention: "^([A-Z][a-z0-9]+_?)+$", // Capitalized_Snake_Case
@@ -13,8 +13,40 @@ export const DEFAULT_CONFIG: LibrarianConfig = {
   main_branch: "master",
   hub_version: LATEST_HUB_VERSION,
   allowed_text_extensions: [".md", ".txt", ".json", ".php", ".js", ".py", ".yaml", ".yml", ".sql"],
+  language: "en",
   migration_pending: false,
 };
+
+function migrateV5toV6_Indices(knowledgePath: string) {
+  console.error("Starting V5 -> V6 Migration: Renaming legacy README.md to index.md in wiki/...");
+  const wikiPath = path.join(knowledgePath, "wiki");
+  if (!fs.existsSync(wikiPath)) return;
+
+  function walkAndRename(dir: string) {
+    const items = fs.readdirSync(dir);
+    for (const item of items) {
+      const fullPath = path.join(dir, item);
+      if (fs.statSync(fullPath).isDirectory() && !item.startsWith(".")) {
+        walkAndRename(fullPath);
+      } else if (item.toLowerCase() === "readme.md") {
+        // Skip root README
+        if (dir === knowledgePath) continue; 
+
+        const newPath = path.join(dir, "index.md");
+        if (fs.existsSync(newPath)) {
+          console.error(`Conflict found: ${newPath} already exists. Renaming old README to README.md.bak`);
+          fs.renameSync(fullPath, fullPath + ".bak");
+        } else {
+          console.error(`Migrating: ${fullPath} -> index.md`);
+          fs.renameSync(fullPath, newPath);
+        }
+      }
+    }
+  }
+
+  walkAndRename(wikiPath);
+  console.error("V5 -> V6 Migration completed.");
+}
 
 function generateGitignore(config: LibrarianConfig): string {
   const extensions = config.allowed_text_extensions.map((ext) => `!raw/**/*${ext}`).join("\n");
@@ -187,7 +219,115 @@ ${coreEndMarker}`;
   }
 }
 
-export function initializeHub(knowledgePath: string, configPath: string, projectMapRelPath: string): void {
+export function seedPortalREADME(knowledgePath: string, language: string = "en"): void {
+  const readmePath = path.join(knowledgePath, "README.md");
+  if (fs.existsSync(readmePath)) return;
+
+  const contentEn = `# 📚 LIBRARIAN KNOWLEDGE HUB
+
+Welcome to your personal "Knowledge OS". This Hub is managed by the AI Librarian and optimized for both live reading in Obsidian/SilverBullet and deep analysis by artificial intelligence.
+
+> [!tip] WHERE TO START?
+> ## 🗺️ [[wiki/PROJECT_MAP|OPEN PROJECT & KNOWLEDGE MAP]]
+> Start here to see the tree of all active projects and global concepts.
+
+---
+
+## 🏗️ Hub Architecture
+
+The knowledge base is divided into two key zones:
+
+1.  📂 **[[wiki/|wiki/]] (The Sanctuary)**: 
+    *   This is the structured core of the base. 
+    *   This is where knowledge "quanta" with YAML metadata and mutual links live. 
+    *   **Rule**: Editing here should ideally be performed through Librarian tools to maintain integrity.
+
+2.  📂 **[[raw/|raw/]] (The Sandbox)**: 
+    *   Free information dump zone.
+    *   Logs, dumps, on-the-fly notes, and raw materials go here.
+    *   **Rule**: The Librarian does not monitor the structure of this folder, but can take data from here to synthesize new wiki nodes.
+
+---
+
+<details>
+<summary>🛠️ Technical Information (For Developers)</summary>
+
+### ⚙️ Management Stack
+This Hub is served by three MCP servers:
+- **Librarian Hub**: File management and validation.
+- **Librarian Git**: Versioning (Draft/Master protocol).
+- **Librarian Search**: Semantic search and vectorization.
+
+### 📜 Core Instructions
+The complete set of system rules is located in the file \`[[.librarian/INSTRUCTIONS|CORE INSTRUCTIONS]]\`.
+
+### 🚀 Commands
+If you are using Gemini CLI or another agent:
+- \`check_health\` — check base for broken links.
+- \`update_project_map\` — update project map.
+- \`semantic_search\` — find information by meaning.
+
+</details>
+
+---
+*Librarian is watching. Knowledge crystallization in progress...*
+`;
+
+  const contentRu = `# 📚 LIBRARIAN KNOWLEDGE HUB
+
+Добро пожаловать в вашу персональную «ОС Знаний». Этот Хаб управляется ИИ-Библиотекарем и оптимизирован как для живого чтения в Obsidian/SilverBullet, так и для глубокого анализа искусственным интеллектом.
+
+> [!tip] С ЧЕГО НАЧАТЬ?
+> ## 🗺️ [[wiki/PROJECT_MAP|ОТКРЫТЬ КАРТУ ПРОЕКТОВ И ЗНАНИЙ]]
+> Начните отсюда, чтобы увидеть дерево всех активных проектов и глобальных концепций.
+
+---
+
+## 🏗️ Архитектура Хаба
+
+База знаний разделена на две ключевые зоны:
+
+1.  📂 **[[wiki/|wiki/]] (Святилище)**: 
+    *   Это структурированное ядро базы. 
+    *   Здесь живут «кванты» знаний с YAML-метаданными и взаимными ссылками. 
+    *   **Правило**: Редактирование здесь желательно проводить через инструменты Библиотекаря для сохранения целостности.
+
+2.  📂 **[[raw/|raw/]] (Песочница)**: 
+    *   Зона свободного сброса информации.
+    *   Сюда попадают логи, дампы, заметки «на лету» и необработанное сырье.
+    *   **Правило**: Библиотекарь не следит за структурой этой папки, но может брать отсюда данные для синтеза новых вики-узлов.
+
+---
+
+<details>
+<summary>🛠️ Техническая информация (Для разработчиков)</summary>
+
+### ⚙️ Стек управления
+Данный Хаб обслуживается тремя MCP-серверами:
+- **Librarian Hub**: Управление файлами и валидация.
+- **Librarian Git**: Версионирование (Draft/Master протокол).
+- **Librarian Search**: Семантический поиск и векторизация.
+
+### 📜 Основные инструкции
+Полный свод системных правил находится в файле \`[[.librarian/INSTRUCTIONS|CORE INSTRUCTIONS]]\`.
+
+### 🚀 Команды
+Если вы используете Gemini CLI или другой агент:
+- \`check_health\` — проверить базу на битые ссылки.
+- \`update_project_map\` — обновить карту проектов.
+- \`semantic_search\` — найти информацию по смыслу.
+
+</details>
+
+---
+*Librarian is watching. Кристаллизация знаний в процессе...*
+`;
+
+  const finalContent = language === "ru" ? contentRu : contentEn;
+  fs.writeFileSync(readmePath, finalContent, "utf-8");
+}
+
+export function initializeHub(knowledgePath: string, configPath: string): void {
   // 1. Legacy Migration (v1 -> v2)
   const legacyMetaPath = path.join(knowledgePath, "meta");
   const newLibrarianPath = path.join(knowledgePath, ".librarian");
@@ -279,10 +419,13 @@ export function initializeHub(knowledgePath: string, configPath: string, project
   // Ensure we always have the latest version in memory
   if (currentConfig.hub_version < LATEST_HUB_VERSION) {
     console.error(`Upgrading Hub from v${currentConfig.hub_version} to v${LATEST_HUB_VERSION}`);
-    currentConfig.hub_version = LATEST_HUB_VERSION;
     if (currentConfig.hub_version === 5) {
       console.error("v5 Migration: Enabling Git Structural Audit...");
     }
+    if (currentConfig.hub_version < 6) {
+      migrateV5toV6_Indices(knowledgePath);
+    }
+    currentConfig.hub_version = LATEST_HUB_VERSION;
   }
   fs.writeFileSync(configPath, JSON.stringify(currentConfig, null, 2));
 
@@ -309,16 +452,6 @@ export function initializeHub(knowledgePath: string, configPath: string, project
     }
   }
 
-  // 4. Project Map Enforcement
-  const projectMapFullPath = path.join(knowledgePath, projectMapRelPath);
-  if (!fs.existsSync(projectMapFullPath)) {
-    fs.writeFileSync(
-      projectMapFullPath,
-      "# MAP OF PROJECTS & KNOWLEDGE NODES\n\n*Automatically managed by Librarian.*",
-      "utf-8"
-    );
-  }
-
   // 5. Git Constitution Enforcement
   const gitignorePath = path.join(knowledgePath, ".gitignore");
   const mandatoryContent = generateGitignore(currentConfig);
@@ -342,4 +475,5 @@ export function initializeHub(knowledgePath: string, configPath: string, project
   // 7. Seed AI Instructions & Templates
   seedInstructions(knowledgePath, configPath);
   seedTemplates(knowledgePath);
+  seedPortalREADME(knowledgePath, currentConfig.language);
 }

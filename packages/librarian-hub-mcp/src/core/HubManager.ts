@@ -7,10 +7,10 @@ import {
   getStructuralViolations,
   getDuplicateLinks,
   classifyStrayFile,
+  getMissingIndices,
+  generateFolderIndex,
   type LibrarianConfig
 } from "@librarian/shared";
-
-const PROJECT_MAP_REL_PATH = "wiki/PROJECT_MAP.md";
 
 export class HubManager {
   constructor(
@@ -77,7 +77,6 @@ export class HubManager {
     }
     const orphans = fileBaseNames.filter((n) => !linkMap[n] && n !== "PROJECT_MAP");
     const strayFiles = getStructuralViolations(this.knowledgePath);
-    const projectMapExists = fs.existsSync(path.join(this.knowledgePath, PROJECT_MAP_REL_PATH));
 
     const isolatedItems = this.getIsolatedItems();
     const activeStrayFiles = strayFiles.filter(f => !isolatedItems.includes(f));
@@ -90,6 +89,8 @@ export class HubManager {
         allDuplicates.push(`${path.relative(this.knowledgePath, file)}: ${dupes.join(", ")}`);
       }
     }
+
+    const missingIndices = getMissingIndices(this.knowledgePath);
 
     // SMART CURATION CLASSIFICATION
     const ghosts: string[] = [];
@@ -141,15 +142,19 @@ export class HubManager {
 
     const report = [
       "--- LIBRARIAN HUB HEALTH REPORT ---",
-      `Project Map Status: ${projectMapExists ? "OK" : "MISSING (CRITICAL)"}`,
       `Current Branch: ${currentBranch}`,
       `Illegal Branches Found: ${illegalBranches.length}`,
       `Git Index Status: ${gitDirty ? "DIRTY" : "CLEAN"}`,
       `Broken links: ${brokenLinks.length}`,
       `Orphans: ${orphans.length}`,
+      `Missing Folder Indices: ${missingIndices.length}`,
       `Stray Items in Root: ${activeStrayFiles.length}`,
       `Isolated Items: ${isolatedItems.length}`,
       "",
+      missingIndices.length > 0
+        ? "!!! MISSING FOLDER INDICES (REQUIRED) !!!\n" +
+          missingIndices.map((m) => `- ${m}`).join("\n")
+        : "",
       illegalBranches.length > 0
         ? "!!! ILLEGAL BRANCHES FOUND (MANDATORY CONSOLIDATION REQUIRED) !!!\n" +
           illegalBranches.map((b) => `- ${b}`).join("\n")
@@ -178,6 +183,8 @@ export class HubManager {
       orphans.length > 0 ? "\nOrphaned Nodes: " + orphans.join(", ") : "",
       illegalBranches.length > 0
         ? "\nRECOMMENDATION: Use 'git_consolidate_branches' to enforce Two-Branch Protocol."
+        : missingIndices.length > 0
+        ? "\nRECOMMENDATION: Use 'repair_indices' to automatically generate missing README.md files."
         : activeStrayFiles.length > 0
         ? "\nRECOMMENDATION: Use 'apply_cleanup' to resolve stray files (ghosts will be deleted, others moved, or use 'isolate' to ignore)."
         : gitDirty
@@ -190,6 +197,37 @@ export class HubManager {
       .join("\n");
 
     return report;
+  }
+
+  public repairIndices(): string {
+    const missing = getMissingIndices(this.knowledgePath);
+    if (missing.length === 0) return "No missing indices found.";
+
+    const repaired: string[] = [];
+
+    for (const relDir of missing) {
+      const fullDir = path.join(this.knowledgePath, relDir);
+      const items = fs.readdirSync(fullDir);
+      
+      const files = items
+        .filter(item => item.endsWith(".md") && item.toLowerCase() !== "readme.md" && item.toLowerCase() !== "index.md")
+        .map(name => {
+          // Попытка извлечь краткое описание (например, первую строку после H1)
+          const content = fs.readFileSync(path.join(fullDir, name), "utf-8");
+          const lines = content.split("\n").filter(l => l.trim() !== "" && !l.startsWith("---") && !l.startsWith("#"));
+          const summary = lines.length > 0 ? lines[0].trim() : undefined;
+          return { name, summary };
+        });
+
+      const subfolders = items.filter(item => fs.statSync(path.join(fullDir, item)).isDirectory() && !item.startsWith("."));
+
+      const readmeContent = generateFolderIndex(path.basename(relDir), files, subfolders);
+      const readmePath = path.join(relDir, "index.md");
+      this.writeFileRaw(readmePath, readmeContent);
+      repaired.push(readmePath);
+    }
+
+    return `INDEX REPAIR COMPLETED:\n- Created ${repaired.length} index files.\nDetails:\n` + repaired.map(r => `- ${r}`).join("\n");
   }
 
   public applyCleanup(items: string[]): string {
@@ -326,34 +364,5 @@ export class HubManager {
       .split("\n")
       .map(line => line.trim())
       .filter(line => line && !line.startsWith("#"));
-  }
-
-  public updateProjectMap(): string {
-    const projectsDir = path.join(this.knowledgePath, "wiki", "Projects");
-    const globalDir = path.join(this.knowledgePath, "wiki", "_Global");
-    const projects = fs.existsSync(projectsDir)
-      ? fs
-          .readdirSync(projectsDir)
-          .filter((f) => fs.statSync(path.join(projectsDir, f)).isDirectory())
-      : [];
-    const globalNodes = fs.existsSync(globalDir)
-      ? fs.readdirSync(globalDir).filter((f) => !f.startsWith("."))
-      : [];
-
-    // Deduplicate and sort
-    const projectLinks = Array.from(new Set(projects))
-      .sort()
-      .map((p) => `- [[${p}]]`);
-    const globalLinks = Array.from(new Set(globalNodes.map((g) => g.replace(".md", ""))))
-      .sort()
-      .map((g) => `- [[${g}]]`);
-
-    const mapContent =
-      "# MAP OF PROJECTS & KNOWLEDGE NODES\n\n## 📂 Projects\n" +
-      projectLinks.join("\n") +
-      "\n\n## 🌐 Global Nodes\n" +
-      globalLinks.join("\n");
-    fs.writeFileSync(path.join(this.knowledgePath, PROJECT_MAP_REL_PATH), mapContent, "utf-8");
-    return "Map updated.";
   }
 }

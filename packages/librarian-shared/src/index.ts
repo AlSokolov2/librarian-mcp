@@ -9,6 +9,7 @@ export interface LibrarianConfig {
   main_branch: string;
   hub_version: number;
   allowed_text_extensions: string[];
+  language: string;
   migration_pending?: boolean;
   hub_id?: string;
   hub_aliases?: string[];
@@ -203,4 +204,84 @@ export function classifyStrayFile(
 
   return "TRASH";
 }
+
+/**
+ * Находит папки в wiki/, в которых отсутствует index.md
+ */
+export function getMissingIndices(knowledgePath: string): string[] {
+  const wikiPath = path.join(knowledgePath, "wiki");
+  if (!fs.existsSync(wikiPath)) return [];
+
+  const missing: string[] = [];
+  
+  function walk(dir: string) {
+    const items = fs.readdirSync(dir);
+    const hasIndex = items.some(item => item.toLowerCase() === "index.md");
+    const relDir = path.relative(knowledgePath, dir);
+
+    // Проверяем только подпапки wiki/ (корневой README.md игнорируем здесь)
+    // Сам каталог wiki/ тоже должен иметь index.md
+    if (!hasIndex && relDir.startsWith("wiki")) {
+      missing.push(relDir);
+    }
+
+    for (const item of items) {
+      const fullPath = path.join(dir, item);
+      if (fs.statSync(fullPath).isDirectory() && !item.startsWith(".")) {
+        walk(fullPath);
+      }
+    }
+  }
+
+  walk(wikiPath);
+  return missing;
+}
+
+/**
+ * Генерирует контент index.md для папки на основе её содержимого
+ */
+export function generateFolderIndex(
+  folderName: string, 
+  files: { name: string; summary?: string }[], 
+  subfolders: string[]
+): string {
+  const title = folderName === "wiki" ? "Knowledge Sanctuary" : folderName.replace(/_/g, " ");
+  
+  let moc = files
+    .filter(f => f.name.toLowerCase() !== "index.md" && f.name.toLowerCase() !== "readme.md")
+    .map(f => `* [[${f.name.replace(".md", "")}]] — ${f.summary || "Описание в процессе..."}`)
+    .join("\n");
+    
+  if (subfolders.length > 0) {
+    moc += "\n\n### 📂 Подразделы\n" + subfolders.map(s => `* [[${s}/index|${s.replace(/_/g, " ")}]]`).join("\n");
+  }
+
+  // Базовая Mermaid диаграмма
+  let mermaid = "```mermaid\ngraph TD\n";
+  mermaid += `    Index[${title}] --> Files[Документы]\n`;
+  if (subfolders.length > 0) {
+    mermaid += `    Index --> Subs[Подпапки]\n`;
+  }
+  mermaid += "```";
+
+  return `# ${title}
+
+> [!abstract]
+> Концептуальный узел, объединяющий знания по теме "${title}".
+
+---
+
+## 🗺️ Карта Контента (MOC)
+${moc || "В этой папке пока нет документов."}
+
+---
+
+## 📊 Визуализация
+${mermaid}
+
+---
+[[README|назад на Главную]]
+`;
+}
+
 

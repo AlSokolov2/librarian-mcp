@@ -6,7 +6,9 @@ import {
   classifyStrayFile,
   getStructuralViolations,
   getDuplicateLinks,
-  applyTemplateIfNew
+  applyTemplateIfNew,
+  getMissingIndices,
+  generateFolderIndex
 } from "./index.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -26,7 +28,8 @@ const mockConfig: LibrarianConfig = {
   auto_update_date: true,
   main_branch: "master",
   hub_version: 1,
-  allowed_text_extensions: [".md", ".txt"]
+  allowed_text_extensions: [".md", ".txt"],
+  language: "en"
 };
 
 describe("Librarian Core Logic", () => {
@@ -212,6 +215,44 @@ End text`;
     it("should classify unknown extensions as TRASH", () => {
       const result = classifyStrayFile("image.png", "", wikiBaseNames, allowedExt);
       expect(result).toBe("TRASH");
+    });
+  });
+
+  describe("Navigation & Indexing", () => {
+    const tempHub = path.join(os.tmpdir(), "temp_test_hub_indexing");
+
+    beforeEach(() => {
+      if (fs.existsSync(tempHub)) fs.rmSync(tempHub, { recursive: true, force: true });
+      fs.mkdirSync(path.join(tempHub, "wiki/ProjectA"), { recursive: true });
+      fs.mkdirSync(path.join(tempHub, "wiki/ProjectB"), { recursive: true });
+      fs.writeFileSync(path.join(tempHub, "wiki/index.md"), "# Root Index");
+      fs.writeFileSync(path.join(tempHub, "wiki/ProjectA/index.md"), "# Project A Index");
+      // ProjectB is missing index.md
+    });
+
+    afterEach(() => {
+      if (fs.existsSync(tempHub)) fs.rmSync(tempHub, { recursive: true, force: true });
+    });
+
+    it("getMissingIndices should identify folders without index.md", () => {
+      const missing = getMissingIndices(tempHub);
+      expect(missing).toContain("wiki/ProjectB");
+      expect(missing).not.toContain("wiki/ProjectA");
+      expect(missing).not.toContain("wiki"); // Root wiki/ has index.md
+    });
+
+    it("generateFolderIndex should return compliant markdown", () => {
+      const files = [{ name: "Doc1.md", summary: "Test Doc" }];
+      const subfolders = ["SubA"];
+      const readme = generateFolderIndex("Test_Folder", files, subfolders);
+      
+      expect(readme).toContain("# Test Folder");
+      expect(readme).toContain("> [!abstract]");
+      expect(readme).toContain("## 🗺️ Карта Контента (MOC)");
+      expect(readme).toContain("[[Doc1]] — Test Doc");
+      expect(readme).toContain("### 📂 Подразделы");
+      expect(readme).toContain("[[SubA/index|SubA]]");
+      expect(readme).toContain("```mermaid");
     });
   });
 
